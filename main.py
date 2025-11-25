@@ -62,16 +62,23 @@ mahoshojo_over = [2339,800]   #文本范围右下角位置
 
 import random
 import time
-import keyboard
+from pynput import keyboard
+from pynput.keyboard import Key, Controller, HotKey, GlobalHotKeys
 import pyperclip
 import io
 from PIL import Image,ImageDraw,ImageFont
-import win32clipboard
+import pyclip
+from sys import platform
 import os
 import shutil
 
 from text_fit_draw import draw_text_auto
 from image_fit_paste import paste_image_auto
+
+
+kbd_controller = Controller()       # 跨平台键盘控制器
+PLATFORM = platform.lower()         # 获取当前平台信息
+if PLATFORM == 'darwin': print("提示: 在 macOS 上首次运行时，请在'系统设置 > 隐私与安全性 > 辅助功能'中授权此程序")
 
 i = -1
 value_1 = -1
@@ -221,7 +228,7 @@ def delate(folder_path, quality=85):
 
 def generate_and_save_images(character_name):
     now_file = os.path.dirname(os.path.abspath(__file__))
-    
+
     # 获取当前角色的表情数量
     emotion_count = mahoshojo[character_name]["emotion_count"]
 
@@ -229,19 +236,19 @@ def generate_and_save_images(character_name):
         if filename.startswith(character_name):
             return
     print("正在加载")
-    for i in range(16):     
+    for i in range(16):
         for j in range(emotion_count):
                 # 使用绝对路径加载背景图片和角色图片
             background_path = os.path.join(now_file, "background", f"c{i+1}.png")
             overlay_path = os.path.join(now_file, character_name, f"{character_name} ({j+1}).png")
-                
+
             background = Image.open(background_path).convert("RGBA")
             overlay = Image.open(overlay_path).convert("RGBA")
-                
+
             img_num = j * 16 + i + 1
             result = background.copy()
             result.paste(overlay, (0, 134), overlay)
-                
+
                 # 使用绝对路径保存生成的图片
             save_path = os.path.join(os.path.join(magic_cut_folder), f"{character_name} ({img_num}).jpg")
             result.convert("RGB").save(save_path)
@@ -254,10 +261,10 @@ def switch_character(new_index):
         current_character_index = new_index
         character_name = get_current_character()
         print(f"已切换到角色: {character_name}")
-        
+
         # 生成并保存图片
         generate_and_save_images(character_name)
-        
+
         return True
     return False
 
@@ -289,34 +296,34 @@ def get_random_value():
     character_name = get_current_character()
     emotion_count = get_current_emotion_count()
     total_images = 16 * emotion_count
-    
+
     if expression:
         i = random.randint((expression-1)*16+1,expression*16)
         value_1 = i
         expression = None
         return f"{character_name} ({i})"
-    
-    
+
+
     # 循环直到找到与上次不同表情的图片
     max_attempts = 100  # 防止无限循环的安全机制
     attempts = 0
-    
+
     while attempts < max_attempts:
         i = random.randint(1, total_images)
         current_emotion = (i-1) // 16
-        
+
         # 处理第一次调用的情况
         if value_1 == -1:
             value_1 = i
             return f"{character_name} ({i})"
-        
+
         # 检查是否与上次表情不同
         if current_emotion != (value_1-1) //16:
             value_1 = i
             return f"{character_name} ({i})"
-        
+
         attempts += 1
-    
+
     # 如果尝试多次仍未找到（理论上概率极低），则返回当前随机数
     # 这是一个安全机制，防止程序卡住
     value_1 = i
@@ -342,7 +349,7 @@ PASTE_HOTKEY= "ctrl+v"
 SEND_HOTKEY= "enter"
 
 # 是否阻塞按键, 如果热键设置为阻塞模式, 则按下热键时不会将该按键传递给前台应用
-# 如果生成热键和发送热键相同, 则强制阻塞, 防止误触发发送消息
+# 如果生成热键和发送热键相同, 則強制阻塞, 防止誤觸發發送消息
 # 此值为布尔值, True 或 False
 BLOCK_HOTKEY= False
 
@@ -361,23 +368,37 @@ AUTO_SEND_IMAGE= True
 
 
 def copy_png_bytes_to_clipboard(png_bytes: bytes):
-    # 打开 PNG 字节为 Image
-    image = Image.open(io.BytesIO(png_bytes))
-    # 转换成 BMP 字节流（去掉 BMP 文件头的前 14 个字节）
-    with io.BytesIO() as output:
-        image.convert("RGB").save(output, "BMP")
-        bmp_data = output.getvalue()[14:]
-    # 打开剪贴板并写入 DIB 格式
-    win32clipboard.OpenClipboard()
-    win32clipboard.EmptyClipboard()
-    win32clipboard.SetClipboardData(win32clipboard.CF_DIB, bmp_data)
-    win32clipboard.CloseClipboard()
+    """将 PNG 字节数据复制到剪贴板（跨平台）"""
+    try:
+        if PLATFORM == 'darwin':
+            # 在 macOS 上需要使用 osascript 才能正确复制图片
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                tmp.write(png_bytes)
+                tmp_path = tmp.name
+
+            # 使用 osascript 复制图片到剪贴板
+            import subprocess
+            cmd = f"""osascript -e 'set the clipboard to (read (POSIX file "{tmp_path}") as «class PNGf»)'"""
+            result = subprocess.run(cmd, shell=True, capture_output=True)
+
+            # 清理临时文件
+            os.unlink(tmp_path)
+
+            if result.returncode != 0:
+                print(f"复制图片到剪贴板失败: {result.stderr.decode()}")
+        else:
+            # Windows 和 Linux 使用 pyclip
+            pyclip.copy(png_bytes)
+    except Exception as e:
+        print(f"复制图片到剪贴板失败: {e}")
 
 
 def cut_all_and_get_text() -> str:
     """
-    #模拟 Ctrl+A / Ctrl+X 剪切全部文本，并返回剪切得到的内容。
-    #delay: 每步之间的延时（秒），默认0.1秒。
+    模拟 Ctrl+A / Ctrl+X 剪切全部文本，并返回剪切得到的内容。
+    跨平台: 在macOS上使用Cmd键代替Ctrl键。
+    delay: 每步之间的延时（秒），默认0.1秒。
     """
     # 备份原剪贴板
     old_clip = pyperclip.paste()
@@ -385,9 +406,13 @@ def cut_all_and_get_text() -> str:
     # 清空剪贴板，防止读到旧数据
     pyperclip.copy("")
 
-    # 发送 Ctrl+A 和 Ctrl+X
-    keyboard.send(SELECT_ALL_HOTKEY)
-    keyboard.send(CUT_HOTKEY)
+    # 发送 组合键
+    kbd_controller.press(Key.ctrl if PLATFORM != 'darwin' else Key.cmd)
+    kbd_controller.press('a')
+    kbd_controller.release('a')
+    kbd_controller.press('x')
+    kbd_controller.release('x')
+    kbd_controller.release(Key.ctrl if PLATFORM != 'darwin' else Key.cmd)
     time.sleep(DELAY)
 
     # 获取剪切后的内容
@@ -398,32 +423,42 @@ def cut_all_and_get_text() -> str:
 def try_get_image() -> Image.Image | None:
     """
     尝试从剪贴板获取图像，如果没有图像则返回 None。
-    仅支持 Windows。
+    跨平台支持。
     """
     try:
-        win32clipboard.OpenClipboard()
-        if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_DIB):
-            data = win32clipboard.GetClipboardData(win32clipboard.CF_DIB)
-            if data:
-                # 将 DIB 数据转换为字节流，供 Pillow 打开
-                bmp_data = data
-                # DIB 格式缺少 BMP 文件头，需要手动加上
-                # BMP 文件头是 14 字节，包含 "BM" 标识和文件大小信息
-                header = b'BM' + (len(bmp_data) + 14).to_bytes(4, 'little') + b'\x00\x00\x00\x00\x36\x00\x00\x00'
-                image = Image.open(io.BytesIO(header + bmp_data))
+        # 使用 pyclip 获取剪贴板数据（二进制）
+        data = pyclip.paste()
+
+        # 如果是字节类型，尝试解析为图片
+        if isinstance(data, bytes) and len(data) > 0:
+            # 检查是否是文本数据（通常文本数据较短且可解码）
+            try:
+                # 尝试解码为文本，如果成功说明不是图片
+                text = data.decode('utf-8')
+                # 如果解码成功且内容看起来像文本，则不是图片
+                if len(text) < 10000:  # 图片数据通常很大
+                    return None
+            except (UnicodeDecodeError, AttributeError):
+                # 解码失败，可能是图片数据
+                pass
+
+            # 尝试将字节数据转换为图片
+            try:
+                image = Image.open(io.BytesIO(data))
+                # 验证图片是否有效
+                image.load()
                 return image
+            except Exception as e:
+                # 不是有效的图片格式
+                return None
+
     except Exception as e:
-        print("无法从剪贴板获取图像：", e)
-    finally:
-        try:
-            win32clipboard.CloseClipboard()
-        except:
-            pass
+        print(f"无法从剪贴板获取图像: {e}")
     return None
 
 def Start():
     print("Start generate...")
-    
+
     character_name = get_current_character()
     address = os.path.join(magic_cut_folder, get_random_value()+".jpg")
     BASEIMAGE_FILE = address
@@ -443,7 +478,7 @@ def Start():
     if text == "" and image is None:
         print("no text or image")
         return
-    
+
     png_bytes=None
 
     if image is not None:
@@ -466,7 +501,7 @@ def Start():
         except Exception as e:
             print("Generate image failed:", e)
             return
-    
+
     elif text != "":
         print("Get text: "+text)
 
@@ -497,34 +532,71 @@ def Start():
     copy_png_bytes_to_clipboard(png_bytes)
     
     if AUTO_PASTE_IMAGE:
-        keyboard.send(PASTE_HOTKEY)
+        kbd_controller.press(Key.ctrl if PLATFORM != 'darwin' else Key.cmd)
+        kbd_controller.press('v')
+        kbd_controller.release('v')
+        kbd_controller.release(Key.ctrl if PLATFORM != 'darwin' else Key.cmd)
 
         time.sleep(0.3)
 
         if AUTO_SEND_IMAGE:
-            keyboard.send(SEND_HOTKEY)
+            kbd_controller.press(Key.enter)
+            kbd_controller.release(Key.enter)
 
-# 角色切换快捷键绑定
-# 按Ctrl+1 到 Ctrl+9: 切换角色1-9
-for i in range(1,10):
-    keyboard.add_hotkey(f'ctrl+{i}', lambda idx=i: switch_character(idx))
+# 定义全局热键映射
+hotkey_bindings = {
+    # 角色切换快捷键 Ctrl+1 到 Ctrl+9
+    '<ctrl>+1': lambda: switch_character(1),
+    '<ctrl>+2': lambda: switch_character(2),
+    '<ctrl>+3': lambda: switch_character(3),
+    '<ctrl>+4': lambda: switch_character(4),
+    '<ctrl>+5': lambda: switch_character(5),
+    '<ctrl>+6': lambda: switch_character(6),
+    '<ctrl>+7': lambda: switch_character(7),
+    '<ctrl>+8': lambda: switch_character(8),
+    '<ctrl>+9': lambda: switch_character(9),
 
-# 角色10-13使用特殊快捷键
-keyboard.add_hotkey('ctrl+q', lambda: switch_character(10))   # 角色10
-keyboard.add_hotkey('ctrl+e', lambda: switch_character(11))  # 角色11
-keyboard.add_hotkey('ctrl+r', lambda: switch_character(12))  # 角色12
-keyboard.add_hotkey('ctrl+t', lambda: switch_character(13))  # 角色13
-keyboard.add_hotkey('ctrl+y', lambda: switch_character(0)) 
-keyboard.add_hotkey('ctrl+Tab', lambda: delate(magic_cut_folder))
+    # 角色10-14使用特殊快捷键
+    '<ctrl>+q': lambda: switch_character(10),
+    '<ctrl>+e': lambda: switch_character(11),
+    '<ctrl>+r': lambda: switch_character(12),
+    '<ctrl>+t': lambda: switch_character(13),
+    '<ctrl>+y': lambda: switch_character(0),
 
-for i in range(1,10):
-    keyboard.add_hotkey(f'alt+{i}', lambda idx=i: get_expression(idx))
+    # 显示当前角色
+    '<ctrl>+0': show_current_character,
 
-# 绑定 Ctrl+Alt+H 作为全局热键
-ok=keyboard.add_hotkey(HOTKEY,Start, suppress=BLOCK_HOTKEY or HOTKEY==SEND_HOTKEY)
+    # 表情切换 Alt+1-9
+    '<alt>+1': lambda: get_expression(1),
+    '<alt>+2': lambda: get_expression(2),
+    '<alt>+3': lambda: get_expression(3),
+    '<alt>+4': lambda: get_expression(4),
+    '<alt>+5': lambda: get_expression(5),
+    '<alt>+6': lambda: get_expression(6),
+    '<alt>+7': lambda: get_expression(7),
+    '<alt>+8': lambda: get_expression(8),
+    '<alt>+9': lambda: get_expression(9),
 
-# 绑定Ctrl+0显示当前角色
-keyboard.add_hotkey('ctrl+0', show_current_character)
+    # 生成图片
+    '<enter>': Start,
 
-# 保持程序运行
-keyboard.wait("Esc")
+    # 清除图片
+    '<ctrl>+<tab>': lambda: delate(magic_cut_folder),
+}
+
+
+# 创建全局热键监听器
+listener = GlobalHotKeys(hotkey_bindings)
+listener.start()
+
+print("快捷键监听已启动，按 Esc 退出程序")
+
+# 保持程序运行，监听 Esc 键 (或 Ctrl+C) 退出
+try:
+    with keyboard.Listener(on_press=lambda key: key != Key.esc) as esc_listener:
+        esc_listener.join()
+except KeyboardInterrupt:
+    pass
+finally:
+    listener.stop()
+    print("\n程序已退出")
