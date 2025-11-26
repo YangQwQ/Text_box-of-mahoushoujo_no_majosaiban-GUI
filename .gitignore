@@ -1,2 +1,4 @@
-.vs/
-_pycache_/
+/assets/cache/
+/__pycache__/
+/.vs/
+/emoji_png/
