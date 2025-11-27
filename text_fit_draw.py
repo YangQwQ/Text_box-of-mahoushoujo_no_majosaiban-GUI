@@ -43,9 +43,10 @@ def draw_text_auto(
     valign: VAlign = "middle",
     line_spacing: float = 0.15,
     bracket_color: Tuple[int, int, int] = (137,177,251),  # 中括号及内部内容颜色
-    image_overlay: Union[str, Image.Image,None]=None,
+    image_overlay: Union[str, Image.Image, None] = None,
     role_name: str = "unknown",  # 添加角色名称参数
     text_configs_dict: dict = None,  # 添加文字配置字典参数
+    base_path: str = None,  # 添加基础路径参数
 ) -> bytes:
     """
     在指定矩形内自适应字号绘制文本；
@@ -58,9 +59,10 @@ def draw_text_auto(
     else:
         img = Image.open(image_source).convert("RGBA")
     
-    # 压缩底图
+    # 创建绘图对象
     draw = ImageDraw.Draw(img)
 
+    # 处理覆盖图层
     if image_overlay is not None:
         if isinstance(image_overlay, Image.Image):
             img_overlay = image_overlay.copy()
@@ -76,10 +78,37 @@ def draw_text_auto(
     # --- 2. 字体加载 ---
     def _load_font(size: int) -> ImageFont.FreeTypeFont:
         if font_path and os.path.exists(font_path):
-            return ImageFont.truetype(font_path, size=size)
+            try:
+                return ImageFont.truetype(font_path, size=size)
+            except Exception as e:
+                print(f"加载指定字体失败 {font_path}: {e}")
+        
+        # 尝试多种默认字体
+        font_files = ["arial.ttf", "DejaVuSans.ttf"]
+        if base_path:
+            font_dir = os.path.join(base_path, 'assets', 'fonts')
+            # 优先尝试项目字体
+            project_fonts = ["font3.ttf"] + font_files
+            for font_file in project_fonts:
+                try_path = os.path.join(font_dir, font_file)
+                if os.path.exists(try_path):
+                    try:
+                        return ImageFont.truetype(try_path, size=size)
+                    except Exception:
+                        continue
+        
+        # 尝试系统字体
+        for font_file in font_files:
+            try:
+                return ImageFont.truetype(font_file, size=size)
+            except Exception:
+                continue
+        
+        # 最后使用默认字体
         try:
-            return ImageFont.truetype("DejaVuSans.ttf", size=size)
+            return ImageFont.load_default()
         except Exception:
+            # 如果默认字体也失败，创建一个简单的字体
             return ImageFont.load_default()
 
     # --- 3. 文本包行 ---
@@ -127,8 +156,13 @@ def draw_text_auto(
 
     # --- 4. 测量 ---
     def measure_block(lines: list[str], font: ImageFont.FreeTypeFont) -> tuple[int, int, int]:
-        ascent, descent = font.getmetrics()
-        line_h = int((ascent + descent) * (1 + line_spacing))
+        try:
+            ascent, descent = font.getmetrics()
+            line_h = int((ascent + descent) * (1 + line_spacing))
+        except:
+            # 如果获取字体指标失败，使用估计值
+            line_h = int(font.size * (1 + line_spacing))
+        
         max_w = 0
         for ln in lines:
             max_w = max(max_w, int(draw.textlength(ln, font=font)))
@@ -159,7 +193,7 @@ def draw_text_auto(
         font = _load_font(best_size)
 
     # --- 6. 解析着色片段 ---
-    def parse_color_segments(s: str,in_bracket: bool) -> Tuple[list[tuple[str, Tuple[int, int, int]]],bool]:
+    def parse_color_segments(s: str, in_bracket: bool) -> Tuple[list[tuple[str, Tuple[int, int, int]]], bool]:
         segs: list[tuple[str, Tuple[int, int, int]]] = []
         buf = ""
         for ch in s:
@@ -179,7 +213,7 @@ def draw_text_auto(
                 buf += ch
         if buf:
             segs.append((buf, bracket_color if in_bracket else color))
-        return segs,in_bracket
+        return segs, in_bracket
 
     # --- 7. 垂直对齐 ---
     if valign == "top":
@@ -200,10 +234,12 @@ def draw_text_auto(
             x = x1 + (region_w - line_w) // 2
         else:
             x = x2 - line_w
-        segments,in_bracket = parse_color_segments(ln,in_bracket)
+        segments, in_bracket = parse_color_segments(ln, in_bracket)
         for seg_text, seg_color in segments:
             if seg_text:
-                draw.text((x+4, y+4), seg_text, font=font, fill=(0,0,0))# 文字阴影
+                # 绘制文字阴影
+                draw.text((x+2, y+2), seg_text, font=font, fill=(0, 0, 0, 128))
+                # 绘制主文字
                 draw.text((x, y), seg_text, font=font, fill=seg_color)
                 x += int(draw.textlength(seg_text, font=font))
         y += best_line_h
@@ -228,24 +264,48 @@ def draw_text_auto(
             font_color = tuple(config["font_color"])
             font_size = config["font_size"]
         
-            # 使用绝对路径加载字体文件
-            font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts', "font3.ttf")
-            font = ImageFont.truetype(font_path, font_size)
+            # 使用相对路径加载字体文件，优先使用传入的基础路径
+            if base_path:
+                font_dir = os.path.join(base_path, 'assets', 'fonts')
+            else:
+                font_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts')
+            
+            # 尝试多种字体文件
+            font_files = ["font3.ttf", "arial.ttf", "DejaVuSans.ttf"]
+            role_font = None
+            
+            for font_file in font_files:
+                try_path = os.path.join(font_dir, font_file)
+                if os.path.exists(try_path):
+                    try:
+                        role_font = ImageFont.truetype(try_path, font_size)
+                        break
+                    except Exception as e:
+                        print(f"加载字体 {try_path} 失败: {e}")
+                        continue
+            
+            # 如果所有字体都失败，使用默认字体
+            if role_font is None:
+                try:
+                    role_font = ImageFont.load_default()
+                except:
+                    # 如果默认字体也失败，跳过文字绘制
+                    print("无法加载任何字体，跳过角色专属文字绘制")
+                    continue
             
             # 计算阴影位置
             shadow_position = (position[0] + shadow_offset[0], position[1] + shadow_offset[1])
             
             # 先绘制阴影文字
-            draw.text(shadow_position, text, fill=shadow_color, font=font)
+            draw.text(shadow_position, text, fill=shadow_color, font=role_font)
             
             # 再绘制主文字（覆盖在阴影上方）
-            draw.text(position, text, fill=font_color, font=font)
-    img = compress_image(img)
+            draw.text(position, text, fill=font_color, font=role_font)
+
+    # 压缩图像（可选，根据需求决定是否启用）
+    # img = compress_image(img)
+    
     # --- 9. 输出 PNG ---
-    # img = img.convert('RGB')
-    # buf = BytesIO()
-    # img.save(buf, format="JPEG", quality=20)
-    # return buf.getvalue()
     buf = BytesIO()
-    img.save(buf, format="png")
+    img.save(buf, format="PNG")
     return buf.getvalue()

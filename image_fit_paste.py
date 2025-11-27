@@ -17,13 +17,14 @@ def paste_image_auto(
     padding: int = 0,
     allow_upscale: bool = False,
     keep_alpha: bool = True,
-    image_overlay: Union[str, Image.Image,None]=None,
+    image_overlay: Union[str, Image.Image, None] = None,
     max_image_size: Tuple[int, int] = (None, None),  # 添加最大图片尺寸限制 (width, height)
     role_name: str = "unknown",  # 添加角色名称参数
     text_configs_dict: dict = None,  # 添加文字配置字典参数
+    base_path: str = None,  # 添加基础路径参数
 ) -> bytes:
     """
-    在指定矩形内放置一张图片（content_image），按比例缩放至“最大但不超过”该矩形。
+    在指定矩形内放置一张图片（content_image），按比例缩放至"最大但不超过"该矩形。
     - base_image: 底图（会被复制，原图不改）
     - top_left / bottom_right: 指定矩形区域（左上/右下坐标）
     - content_image: 待放入的图片（PIL.Image.Image）
@@ -41,8 +42,11 @@ def paste_image_auto(
         img = image_source.copy()
     else:
         img = Image.open(image_source).convert("RGBA")
-    # 压缩底图
+    
+    # 创建绘图对象
     draw = ImageDraw.Draw(img)
+    
+    # 处理覆盖图层
     if image_overlay is not None:
         if isinstance(image_overlay, Image.Image):
             img_overlay = image_overlay.copy()
@@ -84,7 +88,7 @@ def paste_image_auto(
     new_h = max(1, int(round(ch * scale)))
 
     # 选择高质量插值
-    resized = content_image.resize((new_w, new_h), Image.LANCZOS)
+    resized = content_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
     # 计算粘贴坐标（考虑对齐与 padding）
     if align == "left":
@@ -113,6 +117,7 @@ def paste_image_auto(
         img.paste(img_overlay, (0, 0), img_overlay)
     elif image_overlay is not None and img_overlay is None:
         print("Warning: overlay image is not exist.")
+    
     # 自动在图片上写角色专属文字
     # 如果提供了文字配置字典且角色名称存在，则使用对应的文字配置
     if text_configs_dict and role_name in text_configs_dict:
@@ -125,9 +130,34 @@ def paste_image_auto(
             font_color = tuple(config["font_color"])
             font_size = config["font_size"]
         
-            # 使用绝对路径加载字体文件
-            font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts', "font3.ttf")
-            font = ImageFont.truetype(font_path, font_size)
+            # 使用相对路径加载字体文件，优先使用传入的基础路径
+            if base_path:
+                font_dir = os.path.join(base_path, 'assets', 'fonts')
+            else:
+                font_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts')
+            
+            # 尝试多种字体文件
+            font_files = ["font3.ttf", "arial.ttf", "DejaVuSans.ttf"]
+            font = None
+            
+            for font_file in font_files:
+                font_path = os.path.join(font_dir, font_file)
+                if os.path.exists(font_path):
+                    try:
+                        font = ImageFont.truetype(font_path, font_size)
+                        break
+                    except Exception as e:
+                        print(f"加载字体 {font_path} 失败: {e}")
+                        continue
+            
+            # 如果所有字体都失败，使用默认字体
+            if font is None:
+                try:
+                    font = ImageFont.load_default()
+                except:
+                    # 如果默认字体也失败，跳过文字绘制
+                    print("无法加载任何字体，跳过文字绘制")
+                    continue
             
             # 计算阴影位置
             shadow_position = (position[0] + shadow_offset[0], position[1] + shadow_offset[1])
