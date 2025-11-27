@@ -46,6 +46,7 @@ class ManosabaTextBox:
         self.KEY_DELAY = 0.1  # 按键延迟
         self.AUTO_PASTE_IMAGE = True  # 自动粘贴图片
         self.AUTO_SEND_IMAGE = True  # 自动发送图片
+        self.PRE_COMPOSE_IMAGES = False  # 是否预合成图片
 
         self.kbd_controller = Controller()  # 键盘控制器
 
@@ -65,7 +66,7 @@ class ManosabaTextBox:
         self.load_configs()
 
         # 状态变量
-        self.emote = None  # 表情索引
+        self.emote = None  # 表情索引，None表示随机
         self.value_1 = -1  # 我也不知道这是啥我也不敢动
         self.current_character_index = 3  # 当前角色索引，默认第三个角色（sherri）
 
@@ -175,12 +176,13 @@ class ManosabaTextBox:
         emotion_cnt = self.get_current_emotion_count()
         total_images = 16 * emotion_cnt
 
-        if self.emote:
+        # 如果指定了表情，使用指定表情
+        if self.emote is not None:
             i = random.randint((self.emote - 1) * 16 + 1, self.emote * 16)
             self.value_1 = i
-            self.emote = None
             return f"{character_name} ({i})"
 
+        # 否则随机选择（避免连续相同表情）
         max_attempts = 100
         attempts = 0
         i = random.randint(1, total_images)
@@ -249,9 +251,17 @@ class ManosabaTextBox:
         elif PLATFORM.startswith('win'):
             keyboard.send("CTRL+A")
             keyboard.send("CTRL+X")
+        # 增加重试机制来确保剪贴板中有内容
+        new_clip = ""
+        max_retries = 3
+        for attempt in range(max_retries):
+            time.sleep(self.KEY_DELAY)
+            new_clip = pyperclip.paste()
+            if new_clip.strip():  # 如果获取到非空内容，则跳出循环
+                break
+            elif attempt < max_retries - 1:  # 如果不是最后一次尝试，则等待更长时间再重试
+                time.sleep(self.KEY_DELAY * (attempt + 1))  # 逐渐增加等待时间
 
-        time.sleep(self.KEY_DELAY)
-        new_clip = pyperclip.paste()
         return new_clip.strip()
 
     def try_get_image(self) -> Image.Image | None:
@@ -343,8 +353,18 @@ class ManosabaTextBox:
         """生成并发送图片，返回状态消息"""
         if not self._active_process_allowed():
             return "前台应用不在白名单内"
+        
         character_name = self.get_character()
+        
+        # 如果不预合成图片，直接使用原始素材合成
+        if not self.PRE_COMPOSE_IMAGES:
+            return self._generate_image_directly(character_name)
+        
+        # 预合成图片模式
         address = os.path.join(self.CACHE_PATH, self.get_random_value() + ".jpg")
+        if not os.path.exists(address):
+            return f"错误: 图片文件不存在 {address}，请确保已预生成图片"
+
         baseimage_file = address
 
         text_box_topleft = (self.BOX_RECT[0][0], self.BOX_RECT[0][1])
@@ -413,7 +433,100 @@ class ManosabaTextBox:
                 self.kbd_controller.press(Key.enter)
                 self.kbd_controller.release(Key.enter)
 
-        return f"成功生成图片！角色: {character_name}, 表情: {1 + (self.value_1 // 16)}"
+        current_emotion = 1 + ((self.value_1 - 1) // 16) if self.value_1 != -1 else "随机"
+        return f"成功生成图片！角色: {character_name}, 表情: {current_emotion}"
+
+    def _generate_image_directly(self, character_name: str) -> str:
+        """直接合成图片（不预合成模式）"""
+        # 随机选择背景和表情
+        bg_index = random.randint(1, 16)
+        emotion_count = self.get_current_emotion_count()
+        
+        # 如果指定了表情，使用指定表情
+        if self.emote is not None:
+            emotion_index = self.emote
+        else:
+            # 随机选择，避免连续相同表情
+            if self.value_1 != -1:
+                last_emotion = (self.value_1 - 1) // 16
+                emotion_index = random.choice([i for i in range(1, emotion_count + 1) if i != last_emotion + 1])
+            else:
+                emotion_index = random.randint(1, emotion_count)
+        
+        self.value_1 = (emotion_index - 1) * 16 + bg_index
+
+        background_path = os.path.join(self.BASE_PATH, 'assets', "background", f"c{bg_index}.png")
+        overlay_path = os.path.join(self.BASE_PATH, 'assets', 'chara', character_name, f"{character_name} ({emotion_index}).png")
+
+        if not os.path.exists(background_path) or not os.path.exists(overlay_path):
+            return f"错误: 素材文件不存在，请检查路径"
+
+        text_box_topleft = (self.BOX_RECT[0][0], self.BOX_RECT[0][1])
+        image_box_bottomright = (self.BOX_RECT[1][0], self.BOX_RECT[1][1])
+        text = self.cut_all_and_get_text()
+        image = self.try_get_image()
+
+        if text == "" and image is None:
+            return "错误: 没有文本或图像"
+
+        png_bytes = None
+
+        if image is not None:
+            try:
+                png_bytes = paste_image_auto(
+                    image_source=background_path,
+                    image_overlay=overlay_path,
+                    top_left=text_box_topleft,
+                    bottom_right=image_box_bottomright,
+                    content_image=image,
+                    align="center",
+                    valign="middle",
+                    padding=12,
+                    allow_upscale=True,
+                    keep_alpha=True,
+                    role_name=character_name,
+                    text_configs_dict=self.text_configs_dict,
+                )
+            except Exception as e:
+                return f"生成图像失败: {e}"
+
+        elif text is not None and text != "":
+            try:
+                png_bytes = draw_text_auto(
+                    image_source=background_path,
+                    image_overlay=overlay_path,
+                    top_left=text_box_topleft,
+                    bottom_right=image_box_bottomright,
+                    text=text,
+                    align="left",
+                    valign='top',
+                    color=(255, 255, 255),
+                    max_font_height=145,
+                    font_path=self.get_current_font(),
+                    role_name=character_name,
+                    text_configs_dict=self.text_configs_dict,
+                )
+            except Exception as e:
+                return f"生成图像失败: {e}"
+
+        if png_bytes is None:
+            return "生成图像失败！"
+
+        self.copy_png_bytes_to_clipboard(png_bytes)
+
+        if self.AUTO_PASTE_IMAGE:
+            self.kbd_controller.press(Key.ctrl if PLATFORM != 'darwin' else Key.cmd)
+            self.kbd_controller.press('v')
+            self.kbd_controller.release('v')
+            self.kbd_controller.release(Key.ctrl if PLATFORM != 'darwin' else Key.cmd)
+
+            time.sleep(0.3)
+
+            if self.AUTO_SEND_IMAGE:
+                self.kbd_controller.press(Key.enter)
+                self.kbd_controller.release(Key.enter)
+
+        return f"成功生成图片！角色: {character_name}, 表情: {emotion_index}"
 
 
 class ManosabaTUI(App):
@@ -431,7 +544,7 @@ class ManosabaTUI(App):
     theme = "tokyo-night"
 
     current_character = reactive("sherri")
-    current_emotion = reactive(1)
+    current_emotion = reactive(None)  # None表示随机
     status_msg = reactive("就绪")
 
     BINDINGS = [
@@ -460,7 +573,8 @@ class ManosabaTUI(App):
             self.hotkey_listener = GlobalHotKeys(hotkeys)
             self.hotkey_listener.start()
         elif PLATFORM.startswith('win'):
-            keyboard.add_hotkey(keymap['start_generate'], self.trigger_generate)
+            # 使用 keyboard 库的 add_hotkey，并设置守护线程
+            keyboard.add_hotkey(keymap['start_generate'], self.trigger_generate, suppress=False)
 
     def trigger_generate(self) -> None:
         """全局热键触发生成图片（在后台线程中调用）"""
@@ -490,11 +604,13 @@ class ManosabaTUI(App):
                     yield Label("选择表情 (Emotion)", classes="panel_title")
                     with ScrollableContainer():
                         with RadioSet(id="emotion_radio"):
+                            # 第一个选项是随机
+                            yield RadioButton("随机", value=True, id="emotion_random")
                             emotion_cnt = self.textbox.get_current_emotion_count()
                             for i in range(1, emotion_cnt + 1):
                                 yield RadioButton(
                                     f"表情 {i}",
-                                    value=(i == 1),
+                                    value=False,
                                     id=f"emotion_{i}"
                                 )
                 with Vertical(id="switch_panel"):
@@ -502,6 +618,8 @@ class ManosabaTUI(App):
                     yield Switch(value=self.textbox.AUTO_PASTE_IMAGE, id="auto_paste_switch")
                     yield Label("自动发送: ", classes="switch_label")
                     yield Switch(value=self.textbox.AUTO_SEND_IMAGE, id="auto_send_switch")
+                    yield Label("预合成图片: ", classes="switch_label")
+                    yield Switch(value=self.textbox.PRE_COMPOSE_IMAGES, id="pre_compose_switch")
 
             with Horizontal(id="control_panel"):
                 yield Label(self.status_msg, id="status_label")
@@ -513,9 +631,10 @@ class ManosabaTUI(App):
         """应用启动时执行"""
         self.update_status(f"当前角色: {self.textbox.get_character(self.current_character, full_name=True)} ")
 
-        # 预加载当前角色（在后台线程中执行）
-        char_name = self.textbox.get_character(self.current_character)
-        self.load_character_images(char_name)
+        # 如果启用了预合成，预加载当前角色
+        if self.textbox.PRE_COMPOSE_IMAGES:
+            char_name = self.textbox.get_character(self.current_character)
+            self.load_character_images(char_name)
 
     def load_character_images(self, char_name: str) -> None:
         """在后台线程中加载角色图片"""
@@ -575,6 +694,14 @@ class ManosabaTUI(App):
         elif event.switch.id == "auto_send_switch":
             self.textbox.AUTO_SEND_IMAGE = event.value
             self.update_status("自动发送已" + ("启用" if event.value else "禁用"))
+        elif event.switch.id == "pre_compose_switch":
+            self.textbox.PRE_COMPOSE_IMAGES = event.value
+            self.update_status("预合成图片已" + ("启用" if event.value else "禁用"))
+            
+            # 如果启用预合成，加载当前角色的图片
+            if event.value:
+                char_name = self.textbox.get_character(self.current_character)
+                self.load_character_images(char_name)
 
     def _disable_radio_sets(self) -> None:
         """禁用所有RadioSet"""
@@ -608,23 +735,28 @@ class ManosabaTUI(App):
             char_idx = self.textbox.character_list.index(selected_char) + 1
             self.textbox.switch_character(char_idx)
 
-            # 预加载新角色（使用带进度条的加载方法）
-            self.load_character_images(selected_char)
+            # 如果启用了预合成，预加载新角色
+            if self.textbox.PRE_COMPOSE_IMAGES:
+                self.load_character_images(selected_char)
 
             # 重新生成表情选项（延迟执行以确保状态更新完成）
             self.call_after_refresh(self.refresh_emotion_panel)
 
         elif event.radio_set.id == "emotion_radio":
-            # 从按钮标签中提取表情编号
-            try:
-                label = event.pressed.label.plain
-                emotion_num = int(label.split()[-1])
-                self.current_emotion = emotion_num
-                self.textbox.emote = emotion_num
-                self.update_status(f"已选择表情 {emotion_num} 喵")
-            except (ValueError, AttributeError, IndexError) as e:
-                self.update_status(e)
-                pass
+            # 处理表情选择
+            emotion_id = event.pressed.id
+            if emotion_id == "emotion_random":
+                self.current_emotion = None
+                self.textbox.emote = None
+                self.update_status("已选择随机表情")
+            else:
+                try:
+                    emotion_num = int(emotion_id.replace("emotion_", ""))
+                    self.current_emotion = emotion_num
+                    self.textbox.emote = emotion_num
+                    self.update_status(f"已选择表情 {emotion_num}")
+                except (ValueError, AttributeError, IndexError) as e:
+                    self.update_status(f"选择表情错误: {e}")
 
     def refresh_emotion_panel(self) -> None:
         """刷新表情面板"""
@@ -638,17 +770,18 @@ class ManosabaTUI(App):
             except Exception:
                 pass
 
-        # 重置表情为 1
-        self.current_emotion = 1
-        self.textbox.emote = 1
+        # 重置表情为随机
+        self.current_emotion = None
+        self.textbox.emote = None
 
-        # 添加新的按钮
+        # 添加新的按钮，第一个是随机
+        yield RadioButton("随机", value=True, id="emotion_random")
         emotion_cnt = self.textbox.get_current_emotion_count()
         for i in range(1, emotion_cnt + 1):
-            unique_id = f"emotion_{self.current_character}_{i}"
+            unique_id = f"emotion_{i}"
             btn = RadioButton(
                 f"表情 {i}",
-                value=(self.textbox.emote == i),
+                value=False,
                 id=unique_id
             )
             emotion_radio.mount(btn)
@@ -684,6 +817,8 @@ class ManosabaTUI(App):
         # 停止全局热键监听器
         if self.hotkey_listener:
             self.hotkey_listener.stop()
+        elif PLATFORM.startswith('win'):
+            keyboard.clear_all_hotkeys()
         self.exit()
 
 
