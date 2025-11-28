@@ -142,3 +142,27 @@ class ClipboardManager:
     def _get_image_linux(self) -> Image.Image | None:
         """Linux 从剪贴板获取图片"""
         return None
+    
+    def has_image_in_clipboard(self) -> bool:
+        """检查剪贴板中是否有图片"""
+        try:
+            if platform.startswith('win'):
+                import win32clipboard
+                win32clipboard.OpenClipboard()
+                try:
+                    # 尝试获取剪贴板中的图片数据
+                    if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_DIB):
+                        return True
+                    return False
+                finally:
+                    win32clipboard.CloseClipboard()
+            elif platform == 'darwin':
+                # macOS 的实现
+                from AppKit import NSPasteboard, NSPasteboardTypePNG
+                pasteboard = NSPasteboard.generalPasteboard()
+                return pasteboard.availableTypeFromArray_([NSPasteboardTypePNG]) is not None
+            else:
+                # Linux 的实现
+                return False  # 需要根据具体实现补充
+        except Exception:
+            return False

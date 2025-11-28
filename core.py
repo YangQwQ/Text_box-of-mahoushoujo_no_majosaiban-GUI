@@ -61,9 +61,9 @@ class ManosabaCore:
         self.current_base_image = None
         self.current_base_image_key = None
         
-        # 启动热键监听线程
-        self.hotkey_thread = threading.Thread(target=self._setup_hotkeys, daemon=True)
-        self.hotkey_thread.start()
+        # # 启动热键监听线程
+        # self.hotkey_thread = threading.Thread(target=self._setup_hotkeys, daemon=True)
+        # self.hotkey_thread.start()
 
     def load_configs(self):
         """加载所有配置"""
@@ -73,15 +73,15 @@ class ManosabaCore:
         self.keymap = self.config_loader.load_keymap(platform)
         self.process_whitelist = self.config_loader.load_process_whitelist(platform)
 
-    def _setup_hotkeys(self):
-        """设置全局热键"""
-        if platform.startswith('win'):
-            try:
-                import keyboard
-                hotkey = self.keymap.get('start_generate', 'ctrl+alt+g')
-                keyboard.add_hotkey(hotkey, self.generate_image)
-            except ImportError:
-                print("键盘模块不可用，热键功能禁用")
+    # def _setup_hotkeys(self):
+    #     """设置全局热键"""
+    #     if platform.startswith('win'):
+    #         try:
+    #             import keyboard
+    #             hotkey = self.keymap.get('start_generate', 'ctrl+alt+g')
+    #             keyboard.add_hotkey(hotkey, self.generate_image)
+    #         except ImportError:
+    #             print("键盘模块不可用，热键功能禁用")
 
     def get_character(self, index: str | None = None, full_name: bool = False) -> str:
         """获取角色名称"""
@@ -250,15 +250,15 @@ class ManosabaCore:
         
         character_name = self.get_character()
         
-        # 使用预览时确定的表情和背景，确保一致
-        if self.preview_emotion is not None:
+        # 确保使用预览时确定的表情和背景
+        if hasattr(self, 'preview_emotion') and self.preview_emotion is not None:
             emotion_index = self.preview_emotion
         elif self.selected_emotion is None:
             emotion_index = self._get_random_emotion(self.get_current_emotion_count())
         else:
             emotion_index = self.selected_emotion
             
-        if self.preview_background is not None:
+        if hasattr(self, 'preview_background') and self.preview_background is not None:
             background_index = self.preview_background
         elif self.selected_background is None:
             background_index = self.image_processor.get_random_background()
@@ -287,7 +287,18 @@ class ManosabaCore:
         # 复制到剪贴板
         if not self.clipboard_manager.copy_image_to_clipboard(png_bytes):
             return "复制到剪贴板失败"
-
+        
+        # 等待剪贴板确认（最多等待2秒）
+        max_wait_time = 2.0
+        wait_interval = 0.1
+        total_waited = 0
+        
+        while total_waited < max_wait_time:
+            # 检查剪贴板中是否有图片
+            if self.clipboard_manager.has_image_in_clipboard():
+                break
+            time.sleep(wait_interval)
+            total_waited += wait_interval
         # 自动粘贴和发送
         if self.config.AUTO_PASTE_IMAGE:
             self.kbd_controller.press(Key.ctrl if platform != 'darwin' else Key.cmd)
@@ -301,14 +312,16 @@ class ManosabaCore:
                 self.kbd_controller.press(Key.enter)
                 self.kbd_controller.release(Key.enter)
 
-        # 重置预览状态
         # 保存当前生成使用的值，用于返回信息
         used_emotion = emotion_index
         used_background = background_index
         
-        # 强制重置预览状态，确保下次预览会重新生成
-        self.preview_emotion = None
-        self.preview_background = None
+        # 重置预览状态，确保下次预览重新生成
+        if hasattr(self, 'preview_emotion'):
+            self.preview_emotion = None
+        if hasattr(self, 'preview_background'):
+            self.preview_background = None
+        
         # 重置最后使用的表情，确保下次随机不会重复
         self.last_emotion = -1
 

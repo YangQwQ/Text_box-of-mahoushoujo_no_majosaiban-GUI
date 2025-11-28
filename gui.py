@@ -27,7 +27,30 @@ class ManosabaGUI:
         
         # 延迟初始预览，确保窗口已经显示
         self.root.after(100, self.initial_preview)
+        # 确保初始状态正确
+        self.update_status("就绪 - 等待生成预览")
+
+        self.setup_hotkeys()
     
+    def setup_hotkeys(self):
+        """设置热键"""
+        def start_hotkey_listener():
+            try:
+                import keyboard
+                hotkey = self.core.keymap.get('start_generate', 'ctrl+alt+g')
+                keyboard.add_hotkey(hotkey, self.on_hotkey_triggered)
+                print(f"热键已设置: {hotkey}")
+            except Exception as e:
+                print(f"热键设置失败: {e}")
+        
+        hotkey_thread = threading.Thread(target=start_hotkey_listener, daemon=True)
+        hotkey_thread.start()
+    
+    def on_hotkey_triggered(self):
+        """热键触发时的回调"""
+        # 使用 after 确保在主线程中执行
+        self.root.after(0, self.generate_image)
+
     def initial_preview(self):
         """初始预览生成"""
         self.preview_needs_update = True
@@ -191,11 +214,7 @@ class ManosabaGUI:
         self.update_preview()
     
     def update_preview(self):
-        print("更新预览，preview_needs_update =", self.preview_needs_update)  # 调试用
-        """更新预览 - 只在需要时刷新内容"""
-        if not self.preview_needs_update:
-            return
-
+        """更新预览"""
         try:
             preview_image, info = self.core.generate_preview(self.preview_size)
             
@@ -207,7 +226,6 @@ class ManosabaGUI:
             self.preview_label.configure(image=self.preview_photo)
             
             # 更新预览信息 - 将信息拆分成三个部分横向显示
-            # 假设info是一个包含三个部分的字符串，用换行符分隔
             info_parts = info.split('\n')
             if len(info_parts) >= 3:
                 self.preview_info_var1.set(info_parts[0])
@@ -230,9 +248,6 @@ class ManosabaGUI:
                         self.preview_info_var2.set("")
                     elif i == 2:
                         self.preview_info_var3.set("")
-            
-            # 重置更新标记
-            self.preview_needs_update = False
             
         except Exception as e:
             print(f"更新预览失败: {e}")
@@ -324,19 +339,38 @@ class ManosabaGUI:
         self.core.config.AUTO_SEND_IMAGE = self.auto_send_var.get()
     
     def generate_image(self):
-        """生成图片"""
-        def generate_in_thread():
-            result = self.core.generate_image()
-            # 使用单个 lambda 确保所有操作按顺序执行
-            self.root.after(0, lambda: [
-                self.update_status(result),
-                setattr(self, 'preview_needs_update', True),
-                self.update_preview()
-            ])
+        """生成图片 - 线程安全版本"""
+        # 立即更新状态，让用户知道操作已开始
+        self.status_var.set("正在生成图片...")
+        self.root.update_idletasks()  # 强制立即更新界面
         
-        self.update_status("正在生成图片...")
+        def generate_in_thread():
+            try:
+                result = self.core.generate_image()
+                # 使用 after 方法在主线程中更新 UI
+                self.root.after(0, lambda: self.on_generation_complete(result))
+            except Exception as e:
+                error_msg = f"生成失败: {str(e)}"
+                print(error_msg)  # 调试信息
+                self.root.after(0, lambda: self.on_generation_complete(error_msg))
+        
+        # 启动生成线程
         thread = threading.Thread(target=generate_in_thread, daemon=True)
         thread.start()
+
+    def on_generation_complete(self, result):
+        """生成完成后的回调函数"""
+        self.status_var.set(result)
+        
+        # 强制刷新界面
+        self.root.update_idletasks()
+        
+        # 标记需要更新预览
+        self.preview_needs_update = True
+        self.update_preview()
+        
+        # 再次强制刷新，确保预览也更新
+        self.root.update_idletasks()
     
     def delete_cache(self):
         """清除缓存"""
@@ -346,6 +380,7 @@ class ManosabaGUI:
     def update_status(self, message: str):
         """更新状态栏"""
         self.status_var.set(message)
+        self.root.update_idletasks()
     
     def run(self):
         """运行 GUI"""
