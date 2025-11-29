@@ -94,7 +94,7 @@ class ConfigLoader:
         with open(os.path.join(self.config_path, "process_whitelist.yml"), 'r', encoding="utf-8") as fp:
             config = yaml.safe_load(fp)
             return config.get(platform, [])
-    
+        
     def load_gui_settings(self):
         """加载GUI设置"""
         settings_file = os.path.join(self.config_path, "settings.yml")
@@ -102,6 +102,13 @@ class ConfigLoader:
             "font_family": "font3",
             "font_size": 110,
             "quick_characters": {},
+            "sentiment_matching": {
+                "enabled": False,
+                "ai_model": "ollama",
+                "api_url": "http://localhost:11434/api/generate",
+                "model_name": "qwen2.5",
+                "api_key": ""  # 新增API Key字段
+            },
             "image_compression": {
                 "pixel_reduction_enabled": True,
                 "pixel_reduction_ratio": 50
@@ -114,10 +121,12 @@ class ConfigLoader:
                     settings_data = yaml.safe_load(f) or {}
                     
                     # 合并设置，确保新字段有默认值
-                    merged_settings = default_settings#.copy()
+                    merged_settings = default_settings.copy()
                     merged_settings.update(settings_data)
                     
-                    # 确保image_compression部分完整
+                    # 确保各个部分完整
+                    if "sentiment_matching" in settings_data:
+                        merged_settings["sentiment_matching"].update(settings_data["sentiment_matching"])
                     if "image_compression" in settings_data:
                         merged_settings["image_compression"].update(settings_data["image_compression"])
                     

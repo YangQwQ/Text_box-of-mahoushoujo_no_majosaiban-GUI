@@ -21,16 +21,20 @@ class SettingsWindow:
 
         # 加载设置
         self.settings = self.core.get_gui_settings()
+        # self.core.save_gui_settings(self.settings)
 
         # 创建窗口
         self.window = tk.Toplevel(parent)
         self.window.title("设置")
-        self.window.geometry("500x600")
+        self.window.geometry("500x650")
         self.window.resizable(False, False)
         self.window.transient(parent)
         self.window.grab_set()
 
         self.setup_ui()
+
+        # 确保界面状态正确
+        self.on_ai_model_changed()
 
     def setup_ui(self):
         """设置UI界面"""
@@ -102,9 +106,103 @@ class SettingsWindow:
         
         # 字体说明
         ttk.Label(font_frame, text="注：角色名字字体保持不变，使用角色配置中的专用字体", 
-                 font=("", 8), foreground="gray").grid(
+                font=("", 8), foreground="gray").grid(
             row=2, column=0, columnspan=2, sticky=tk.W, pady=2
         )
+
+        # 情感匹配设置
+        sentiment_frame = ttk.LabelFrame(parent, text="情感匹配设置", padding="10")
+        sentiment_frame.pack(fill=tk.X, pady=5)
+
+        # 启用情感匹配
+        sentiment_settings = self.settings.get("sentiment_matching", {})
+        self.sentiment_enabled_var = tk.BooleanVar(
+            value=sentiment_settings.get("enabled", False)
+        )
+        sentiment_enabled_cb = ttk.Checkbutton(
+            sentiment_frame,
+            text="启用情感匹配功能",
+            variable=self.sentiment_enabled_var,
+            command=self.on_sentiment_enabled_changed
+        )
+        sentiment_enabled_cb.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5)
+
+        # AI模型选择
+        ttk.Label(sentiment_frame, text="AI模型:").grid(
+            row=1, column=0, sticky=tk.W, pady=5
+        )
+        self.ai_model_var = tk.StringVar(
+            value=sentiment_settings.get("ai_model", "ollama")
+        )
+        ai_model_combo = ttk.Combobox(
+            sentiment_frame,
+            textvariable=self.ai_model_var,
+            values=["ollama", "deepseek"],
+            state="readonly",
+            width=15
+        )
+        ai_model_combo.grid(row=1, column=1, sticky=tk.W, pady=5, padx=5)
+        ai_model_combo.bind("<<ComboboxSelected>>", self.on_ai_model_changed)
+
+        # API链接（Ollama使用）
+        self.api_url_label = ttk.Label(sentiment_frame, text="API链接:")
+        self.api_url_label.grid(row=2, column=0, sticky=tk.W, pady=5)
+        
+        self.api_url_var = tk.StringVar(
+            value=sentiment_settings.get("api_url", "http://localhost:11434/api/generate")
+        )
+        self.api_url_entry = ttk.Entry(
+            sentiment_frame,
+            textvariable=self.api_url_var,
+            width=30
+        )
+        self.api_url_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5, padx=5)
+        self.api_url_entry.bind("<KeyRelease>", self.on_setting_changed)
+
+        # 模型名称（Ollama使用）
+        self.model_name_label = ttk.Label(sentiment_frame, text="模型名称:")
+        self.model_name_label.grid(row=3, column=0, sticky=tk.W, pady=5)
+        
+        self.model_name_var = tk.StringVar(
+            value=sentiment_settings.get("model_name", "qwen2.5")
+        )
+        self.model_name_entry = ttk.Entry(
+            sentiment_frame,
+            textvariable=self.model_name_var,
+            width=20
+        )
+        self.model_name_entry.grid(row=3, column=1, sticky=tk.W, pady=5, padx=5)
+        self.model_name_entry.bind("<KeyRelease>", self.on_setting_changed)
+
+        # API Key（DeepSeek使用）- 初始隐藏
+        self.api_key_label = ttk.Label(sentiment_frame, text="API Key:")
+        self.api_key_label.grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.api_key_label.grid_remove()  # 初始隐藏
+        
+        self.api_key_var = tk.StringVar(
+            value=sentiment_settings.get("api_key", "")
+        )
+        self.api_key_entry = ttk.Entry(
+            sentiment_frame,
+            textvariable=self.api_key_var,
+            width=30,
+            show="*"  # 隐藏输入内容
+        )
+        self.api_key_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5, padx=5)
+        self.api_key_entry.grid_remove()  # 初始隐藏
+        self.api_key_entry.bind("<KeyRelease>", self.on_setting_changed)
+
+        # 情感匹配说明
+        ttk.Label(sentiment_frame, 
+                text="注：启用后会自动分析文本情感并选择对应表情，仅对文本内容生效", 
+                font=("", 8), foreground="gray").grid(
+            row=4, column=0, columnspan=2, sticky=tk.W, pady=2
+        )
+
+        sentiment_frame.columnconfigure(1, weight=1)
+        
+        # 根据当前选择的模型初始化界面状态
+        # self.on_ai_model_changed()
 
         # 图像压缩设置
         compression_frame = ttk.LabelFrame(parent, text="图像压缩设置", padding="10")
@@ -152,8 +250,8 @@ class SettingsWindow:
 
         # 压缩说明
         ttk.Label(compression_frame, 
-                 text="注：压缩质量影响PNG输出质量，像素减少通过降低BMP图像分辨率来减小文件大小", 
-                 font=("", 8), foreground="gray").grid(
+                text="注：压缩质量影响PNG输出质量，像素减少通过降低BMP图像分辨率来减小文件大小", 
+                font=("", 8), foreground="gray").grid(
             row=4, column=0, columnspan=2, sticky=tk.W, pady=2
         )
 
@@ -360,12 +458,37 @@ class SettingsWindow:
         self.settings["font_family"] = self.font_family_var.get()
         self.settings["font_size"] = self.font_size_var.get()
 
+        # 更新情感匹配设置
+        if "sentiment_matching" not in self.settings:
+            self.settings["sentiment_matching"] = {}
+        
+        self.settings["sentiment_matching"]["enabled"] = self.sentiment_enabled_var.get()
+        self.settings["sentiment_matching"]["ai_model"] = self.ai_model_var.get()
+        self.settings["sentiment_matching"]["api_url"] = self.api_url_var.get()
+        self.settings["sentiment_matching"]["model_name"] = self.model_name_var.get()
+        self.settings["sentiment_matching"]["api_key"] = self.api_key_var.get()  # 新增API Key
+
+        # 如果情感匹配设置改变，重新初始化情感分析器
+        old_sentiment_settings = self.core.gui_settings.get("sentiment_matching", {})
+        new_sentiment_settings = self.settings["sentiment_matching"]
+        
+        # 检查设置是否有变化
+        settings_changed = (
+            old_sentiment_settings.get("enabled") != new_sentiment_settings.get("enabled") or
+            old_sentiment_settings.get("ai_model") != new_sentiment_settings.get("ai_model") or
+            old_sentiment_settings.get("api_url") != new_sentiment_settings.get("api_url") or
+            old_sentiment_settings.get("model_name") != new_sentiment_settings.get("model_name") or
+            old_sentiment_settings.get("api_key") != new_sentiment_settings.get("api_key")
+        )
+        
+        if settings_changed:
+            # 异步重新初始化情感分析器
+            self.core._initialize_sentiment_analyzer_async()
+            
         # 更新图像压缩设置
         if "image_compression" not in self.settings:
             self.settings["image_compression"] = {}
         
-        # self.settings["image_compression"]["enabled"] = self.compression_enabled_var.get()
-        # self.settings["image_compression"]["quality_preset"] = self.quality_preset_var.get()
         self.settings["image_compression"]["pixel_reduction_enabled"] = self.pixel_reduction_var.get()
         self.settings["image_compression"]["pixel_reduction_ratio"] = self.pixel_reduction_ratio_var.get()
 
@@ -386,9 +509,66 @@ class SettingsWindow:
         # 即时保存设置
         self.core.save_gui_settings(self.settings)
 
+        # 更新核心的GUI设置引用 (这个有用吗)
+        self.core.gui_settings = self.settings.copy()
+
+    def on_ai_model_changed(self, event=None):
+        """AI模型选择改变事件"""
+        if self.ai_model_var.get() == "ollama":
+            # 显示Ollama相关设置
+            self.api_url_label.grid()
+            self.api_url_entry.grid()
+            self.model_name_label.grid()
+            self.model_name_entry.grid()
+            
+            # 隐藏DeepSeek相关设置
+            self.api_key_label.grid_remove()
+            self.api_key_entry.grid_remove()
+            
+            # 设置默认值
+            if not self.api_url_var.get() or "deepseek" in self.api_url_var.get():
+                self.api_url_var.set("http://localhost:11434/api/generate")
+            if not self.model_name_var.get():
+                self.model_name_var.set("qwen2.5")
+        else:  # deepseek
+            # 显示DeepSeek相关设置
+            self.api_key_label.grid()
+            self.api_key_entry.grid()
+            
+            # 隐藏Ollama相关设置
+            self.api_url_label.grid_remove()
+            self.api_url_entry.grid_remove()
+            self.model_name_label.grid_remove()
+            self.model_name_entry.grid_remove()
+            
+            # 设置默认值
+            if not self.api_url_var.get() or "localhost" in self.api_url_var.get():
+                self.api_url_var.set("https://api.deepseek.com/chat/completions")
+            if not self.model_name_var.get():
+                self.model_name_var.set("deepseek-chat")
+        
+        self.on_setting_changed()
+
+    def on_sentiment_enabled_changed(self):
+        """情感匹配启用状态改变事件"""
+        # 调用设置改变回调
+        self.on_setting_changed()
+        
+        # 如果刚刚启用情感匹配且分析器未初始化，则执行初始化
+        if (self.sentiment_enabled_var.get() and 
+            not self.core.sentiment_analyzer_initialized):
+            self.core._initialize_sentiment_analyzer_async()
+            
     def on_save(self):
         """保存设置并关闭窗口"""
         self.on_setting_changed()
+        # 检查情感分析器初始化状态
+        sentiment_settings = self.settings.get("sentiment_matching", {})
+        if (sentiment_settings.get("enabled", False) and 
+            not self.core.sentiment_analyzer_initialized):
+            # 如果启用了情感分析但尚未初始化，则执行一次初始化
+            self.core._initialize_sentiment_analyzer_async()
+            
         self.window.destroy()
 
     def on_apply(self):
@@ -535,6 +715,16 @@ class ManosabaGUI:
             variable=self.auto_send_var,
             command=self.on_auto_send_changed,
         ).grid(row=0, column=1, sticky=tk.W, padx=5)
+
+        # 添加情感匹配复选框
+        sentiment_settings = self.core.get_gui_settings().get("sentiment_matching", {})
+        self.sentiment_matching_var = tk.BooleanVar(value=sentiment_settings.get("enabled", False))
+        ttk.Checkbutton(
+            settings_frame,
+            text="情感匹配",
+            variable=self.sentiment_matching_var,
+            command=self.on_sentiment_matching_changed,
+        ).grid(row=0, column=2, sticky=tk.W, padx=5)
 
         # 预览框架
         preview_frame = ttk.LabelFrame(main_frame, text="图片预览", padding="5")
@@ -718,6 +908,12 @@ class ManosabaGUI:
 
     def switch_emotion(self, direction):
         """切换表情"""
+        # 取消情感匹配勾选
+        if self.sentiment_matching_var.get():
+            self.sentiment_matching_var.set(False)
+            self.on_sentiment_matching_changed()
+            self.update_status("已取消情感匹配（手动切换表情）")
+            
         if self.emotion_random_var.get():
             # 如果当前是随机模式，切换到指定模式
             self.emotion_random_var.set(False)
@@ -894,6 +1090,12 @@ class ManosabaGUI:
 
     def on_emotion_changed(self, event=None):
         """表情改变事件"""
+        # 取消情感匹配勾选
+        if self.sentiment_matching_var.get():
+            self.sentiment_matching_var.set(False)
+            self.on_sentiment_matching_changed()
+            self.update_status("已取消情感匹配（手动选择表情）")
+
         if not self.emotion_random_var.get():
             emotion_value = self.emotion_var.get()
             if emotion_value:
@@ -931,7 +1133,16 @@ class ManosabaGUI:
     def on_auto_send_changed(self):
         """自动发送设置改变"""
         self.core.config.AUTO_SEND_IMAGE = self.auto_send_var.get()
-
+    
+    def on_sentiment_matching_changed(self):
+        """情感匹配设置改变"""
+        settings = self.core.get_gui_settings()
+        if "sentiment_matching" not in settings:
+            settings["sentiment_matching"] = {}
+        
+        settings["sentiment_matching"]["enabled"] = self.sentiment_matching_var.get()
+        self.core.save_gui_settings(settings)
+        
     def generate_image(self):
         """生成图片"""
         if self.is_generating:

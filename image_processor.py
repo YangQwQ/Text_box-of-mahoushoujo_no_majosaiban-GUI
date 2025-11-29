@@ -181,7 +181,7 @@ class ImageProcessor:
         overlay = self._load_character_image(character_name, emotion_index)
 
         # 合成基础图片
-        result = background#.copy()
+        result = background
         result.paste(overlay, (0, 134), overlay)
 
         # 添加角色名称文字 - 使用角色专用字体，保持不变
@@ -211,7 +211,7 @@ class ImageProcessor:
                 draw.text(position, text, fill=font_color, font=font)
 
         self.base_image_cache[cache_key] = result
-        return result#.copy()
+        return result.copy()
 
     def generate_image_fast(
         self,

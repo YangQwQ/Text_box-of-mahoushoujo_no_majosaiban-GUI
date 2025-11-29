@@ -4,6 +4,7 @@ import os
 import time
 import random
 import psutil
+import threading
 from pynput.keyboard import Key, Controller
 from sys import platform
 import keyboard as kb_module
@@ -19,7 +20,7 @@ if platform.startswith("win"):
 from config import ConfigLoader, AppConfig
 from clipboard_utils import ClipboardManager
 from image_processor import ImageProcessor
-
+from sentiment_analyzer import SentimentAnalyzer
 
 class ManosabaCore:
     """魔裁文本框核心类"""
@@ -59,6 +60,112 @@ class ManosabaCore:
 
         # GUI设置
         self.gui_settings = self.config_loader.load_gui_settings()
+
+        # 初始化情感分析器 - 异步方式
+        self.sentiment_analyzer = SentimentAnalyzer()
+        self.sentiment_analyzer_initialized = False
+        
+        # 只有在启用情感匹配时才初始化
+        sentiment_settings = self.gui_settings.get("sentiment_matching", {})
+        if sentiment_settings.get("enabled", False):
+            self._initialize_sentiment_analyzer_async()
+
+    def _initialize_sentiment_analyzer_async(self):
+        """异步初始化情感分析器"""
+        def init_task():
+            try:
+                self._initialize_sentiment_analyzer()
+                self.sentiment_analyzer_initialized = True
+                print("情感分析器初始化完成")
+            except Exception as e:
+                print(f"情感分析器初始化失败: {e}")
+                self.sentiment_analyzer_initialized = False
+        
+        # 在后台线程中初始化
+        init_thread = threading.Thread(target=init_task, daemon=True)
+        init_thread.start()
+
+    def _initialize_sentiment_analyzer(self):
+        """初始化情感分析器"""
+        sentiment_settings = self.gui_settings.get("sentiment_matching", {})
+        if sentiment_settings.get("enabled", False):
+            try:
+                ai_model = sentiment_settings.get("ai_model", "ollama")
+                api_url = sentiment_settings.get("api_url", "http://localhost:11434/api/generate")
+                model_name = sentiment_settings.get("model_name", "qwen2.5")
+                api_key = sentiment_settings.get("api_key", "")  # 获取API Key
+                
+                if ai_model == "ollama":
+                    success = self.sentiment_analyzer.initialize(
+                        api_type='ollama',
+                        url=api_url,
+                        model=model_name
+                    )
+                else:  # deepseek
+                    success = self.sentiment_analyzer.initialize(
+                        api_type='deepseek',
+                        url=api_url,
+                        model=model_name,
+                        api_key=api_key  # 传递API Key
+                    )
+                
+                if success:
+                    print("情感分析器初始化成功")
+                else:
+                    print("情感分析器初始化失败")
+            except Exception as e:
+                print(f"初始化情感分析器失败: {e}")
+        else:
+            print("情感匹配功能未启用")
+
+    def _get_emotion_by_sentiment(self, text: str) -> int:
+        """根据文本情感获取对应的表情索引"""
+        if not text.strip():
+            return None
+        
+        if not self.sentiment_analyzer_initialized:
+            return None
+    
+        try:
+            # 分析情感
+            sentiment = self.sentiment_analyzer.analyze_sentiment(text)
+            if not sentiment:
+                return None
+                
+            current_character = self.get_character()
+            character_meta = self.mahoshojo.get(current_character, {})
+            
+            # 查找对应情感的表情索引列表
+            emotion_indices = character_meta.get(sentiment, [])
+            
+            if not emotion_indices:
+                # 如果没有对应的情感，使用无感情表情
+                emotion_indices = character_meta.get("无感情", [3])  # 默认使用3
+                
+            # 随机选择一个表情索引
+            if emotion_indices:
+                import random
+                return random.choice(emotion_indices)
+            else:
+                return None
+                
+        except Exception as e:
+            print(f"情感分析失败: {e}")
+            return None
+
+    def _update_emotion_by_sentiment(self, text: str) -> bool:
+        """根据文本情感更新表情，返回是否成功更新"""
+        # 检查情感分析器是否已初始化
+        if not self.sentiment_analyzer_initialized:
+            print("情感分析器未初始化，跳过情感分析")
+            return False
+            
+        emotion_index = self._get_emotion_by_sentiment(text)
+        if emotion_index:
+            self.selected_emotion = emotion_index
+            self.preview_emotion = emotion_index
+            return True
+        return False
 
     def load_configs(self):
         """加载所有配置"""
@@ -240,29 +347,34 @@ class ManosabaCore:
         return new_clip.strip()
 
     def generate_image(self) -> str:
-        """生成并发送图片 - 优化版本"""
+        """生成并发送图片"""
         if not self._active_process_allowed():
             return "前台应用不在白名单内"
 
         character_name = self.get_character()
 
         # 使用预览时确定的表情和背景，应该不会报错吧这个
-        emotion_index, background_index = self.preview_emotion, self.preview_background
-        # if hasattr(self, "preview_emotion") and self.preview_emotion is not None:
-        #     emotion_index = self.preview_emotion
-
-        # if hasattr(self, "preview_background") and self.preview_background is not None:
-        #     background_index = self.preview_background
+        # emotion_index, background_index = self.preview_emotion, self.preview_background
 
         # 获取剪切板内容
         text = self.cut_all_and_get_text()
         image = self.clipboard_manager.get_image_from_clipboard()
-        # if image is None:
-        #     print("剪贴板没有图像")
-        #     if  self.clipboard_manager.has_image_in_clipboard():
-        #         print("有图像")
-        # if text == "":
-        #     print("剪贴板没有文本")
+
+        # 情感匹配处理：仅当启用且只有文本内容时
+        sentiment_settings = self.gui_settings.get("sentiment_matching", {})
+        if (sentiment_settings.get("enabled", False) and 
+            text.strip() and 
+            image is None):
+            
+            self.update_status("正在分析文本情感...")
+            emotion_updated = self._update_emotion_by_sentiment(text)
+            
+            if emotion_updated:
+                self.update_status("情感分析完成，更新表情")
+                # 刷新预览以显示新的表情
+                self.generate_preview(self.preview_size if hasattr(self, 'preview_size') else (400, 300))
+            else:
+                self.update_status("情感分析失败，使用默认表情")
 
         if text == "" and image is None:
             return "错误: 没有文本或图像"
@@ -298,8 +410,6 @@ class ManosabaCore:
 
             png_bytes = self.image_processor.generate_image_fast(
                 character_name,
-                # background_index,
-                # emotion_index,
                 text,
                 image,
                 font_path,  # 使用GUI设置的字体而不是角色专用字体
@@ -344,4 +454,9 @@ class ManosabaCore:
         # 重置最后使用的表情，确保下次随机不会重复
         self.last_emotion = -1
 
-        return f"成功生成图片！角色: {character_name}, 表情: {emotion_index}, 背景: {background_index}"
+        return f"成功生成图片！角色: {character_name}, 表情: {self.preview_emotion}, 背景: {self.preview_background}"
+    def update_status(self, message: str):
+        """更新状态（供外部调用）"""
+        # 这个方法可以在GUI中显示状态信息
+        pass
+    
