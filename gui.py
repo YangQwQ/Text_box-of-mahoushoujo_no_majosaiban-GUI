@@ -37,28 +37,6 @@ class SettingsWindow:
 
         # 确保界面状态正确
         self.setup_model_parameters()
-    def test_ai_connection(self):
-        """测试AI连接 - 这会触发模型初始化"""
-        selected_model = self.ai_model_var.get()
-        if selected_model not in self.ai_models:
-            return
-            
-        # 获取当前配置
-        config = {
-            "base_url": self.api_url_var.get(),
-            "api_key": self.api_key_var.get(),
-            "model": self.model_name_var.get()
-        }
-        
-        # 禁用按钮
-        self.test_btn.config(state="disabled")
-        self.test_btn.config(text="测试中...")
-        
-        def test_in_thread():
-            success = self.core.test_ai_connection(selected_model, config)
-            self.window.after(0, lambda: self.on_connection_test_complete(success))
-        
-        threading.Thread(target=test_in_thread, daemon=True).start()
 
     def setup_ui(self):
         """设置UI界面"""
@@ -140,9 +118,9 @@ class SettingsWindow:
 
         # # 启用情感匹配
         sentiment_settings = self.settings.get("sentiment_matching", {})
-        # self.sentiment_enabled_var = tk.BooleanVar(
-        #     value=sentiment_settings.get("enabled", False)
-        # )
+        self.sentiment_enabled_var = tk.BooleanVar(
+            value=sentiment_settings.get("enabled", False)
+        )
         # sentiment_enabled_cb = ttk.Checkbutton(
         #     sentiment_frame,
         #     text="启用情感匹配功能",
@@ -246,151 +224,6 @@ class SettingsWindow:
                 font=("", 8), foreground="gray").grid(
             row=4, column=0, columnspan=2, sticky=tk.W, pady=2
         )
-
-
-    def setup_model_parameters(self):
-        """设置模型参数显示"""
-        # 清除现有参数控件
-        for widget in self.params_frame.winfo_children():
-            widget.destroy()
-        
-        selected_model = self.ai_model_var.get()
-        if selected_model not in self.ai_models:
-            return
-            
-        model_config = self.ai_models[selected_model]
-        sentiment_settings = self.settings.get("sentiment_matching", {})
-        model_settings = sentiment_settings.get("model_configs", {}).get(selected_model, {})
-        
-        # 创建参数输入控件
-        row = 0
-        
-        # API URL
-        ttk.Label(self.params_frame, text="API地址:").grid(
-            row=row, column=0, sticky=tk.W, pady=2
-        )
-        self.api_url_var = tk.StringVar(
-            value=model_settings.get("base_url", model_config.get("base_url", ""))
-        )
-        api_url_entry = ttk.Entry(
-            self.params_frame,
-            textvariable=self.api_url_var,
-            width=40
-        )
-        api_url_entry.grid(row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=2, padx=5)
-        api_url_entry.bind("<KeyRelease>", self.on_setting_changed)
-        row += 1
-        
-        # API Key
-        ttk.Label(self.params_frame, text="API密钥:").grid(
-            row=row, column=0, sticky=tk.W, pady=2
-        )
-        self.api_key_var = tk.StringVar(
-            value=model_settings.get("api_key", model_config.get("api_key", ""))
-        )
-        api_key_entry = ttk.Entry(
-            self.params_frame,
-            textvariable=self.api_key_var,
-            width=40,
-            show="*"
-        )
-        api_key_entry.grid(row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=2, padx=5)
-        api_key_entry.bind("<KeyRelease>", self.on_setting_changed)
-        row += 1
-        
-        # 模型名称
-        ttk.Label(self.params_frame, text="模型名称:").grid(
-            row=row, column=0, sticky=tk.W, pady=2
-        )
-        self.model_name_var = tk.StringVar(
-            value=model_settings.get("model", model_config.get("model", ""))
-        )
-        model_name_entry = ttk.Entry(
-            self.params_frame,
-            textvariable=self.model_name_var,
-            width=40
-        )
-        model_name_entry.grid(row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=2, padx=5)
-        model_name_entry.bind("<KeyRelease>", self.on_setting_changed)
-        row += 1
-        
-        # 模型描述
-        description = model_config.get("description", "")
-        if description:
-            ttk.Label(self.params_frame, text="描述:", font=("", 8)).grid(
-                row=row, column=0, sticky=tk.W, pady=2
-            )
-            ttk.Label(self.params_frame, text=description, font=("", 8), foreground="gray").grid(
-                row=row, column=1, columnspan=2, sticky=tk.W, pady=2, padx=5
-            )
-        
-        self.params_frame.columnconfigure(1, weight=1)
-
-    def test_ai_connection(self):
-        """测试AI连接 - 这会触发模型初始化"""
-        selected_model = self.ai_model_var.get()
-        if selected_model not in self.ai_models:
-            return
-            
-        # 获取当前配置
-        config = {
-            "base_url": self.api_url_var.get(),
-            "api_key": self.api_key_var.get(),
-            "model": self.model_name_var.get()
-        }
-        
-        # 禁用按钮
-        self.test_btn.config(state="disabled")
-        self.test_btn.config(text="测试中...")
-        
-        def test_in_thread():
-            success = self.core.test_ai_connection(selected_model, config)
-            self.window.after(0, lambda: self.on_connection_test_complete(success))
-        
-        threading.Thread(target=test_in_thread, daemon=True).start()
-
-
-    def on_connection_test_complete(self, success: bool):
-        """连接测试完成回调"""
-        self.test_btn.config(state="normal")
-        if success:
-            self.test_btn.config(text="连接成功")
-            # 测试成功时，更新当前配置
-            selected_model = self.ai_model_var.get()
-            if "model_configs" not in self.settings["sentiment_matching"]:
-                self.settings["sentiment_matching"]["model_configs"] = {}
-            self.settings["sentiment_matching"]["model_configs"][selected_model] = {
-                "base_url": self.api_url_var.get(),
-                "api_key": self.api_key_var.get(),
-                "model": self.model_name_var.get()
-            }
-            # 2秒后恢复文本
-            self.window.after(2000, lambda: self.test_btn.config(text="测试连接"))
-        else:
-            self.test_btn.config(text="连接失败")
-            # 连接失败时，禁用情感匹配
-            self.sentiment_enabled_var.set(False)
-            self.on_setting_changed()
-            # 2秒后恢复文本
-            self.window.after(2000, lambda: self.test_btn.config(text="测试连接"))
-
-
-    def update_pixel_label(self, *args):
-        """更新像素减少比例标签"""
-        self.pixel_value_label.config(text=f"{self.pixel_reduction_ratio_var.get()}%")
-        self.on_setting_changed()
-    def get_available_fonts(self):
-        """获取可用字体列表，优先显示项目字体"""
-        fonts_dir = os.path.join(self.core.config.BASE_PATH, "assets", "fonts")
-        project_fonts = []
-
-        # 获取项目字体
-        if os.path.exists(fonts_dir):
-            for file in os.listdir(fonts_dir):
-                if file.lower().endswith(('.ttf', '.otf', '.ttc')):
-                    font_name = os.path.splitext(file)[0]
-                    project_fonts.append(font_name)
-        return project_fonts
 
     def setup_hotkey_tab(self, parent):
         """设置快捷键标签页"""
@@ -568,6 +401,147 @@ class SettingsWindow:
             row=row, column=3, padx=5, pady=2
         )
 
+    def setup_model_parameters(self, event=None):
+        """设置模型参数显示"""
+        # 清除现有参数控件
+        for widget in self.params_frame.winfo_children():
+            widget.destroy()
+        
+        selected_model = self.ai_model_var.get()
+        if selected_model not in self.ai_models:
+            return
+            
+        model_config = self.ai_models[selected_model]
+        sentiment_settings = self.settings.get("sentiment_matching", {})
+        model_settings = sentiment_settings.get("model_configs", {}).get(selected_model, {})
+        
+        # 创建参数输入控件
+        row = 0
+        
+        # API URL
+        ttk.Label(self.params_frame, text="API地址:").grid(
+            row=row, column=0, sticky=tk.W, pady=2
+        )
+        self.api_url_var = tk.StringVar(
+            value=model_settings.get("base_url", model_config.get("base_url", ""))
+        )
+        api_url_entry = ttk.Entry(
+            self.params_frame,
+            textvariable=self.api_url_var,
+            width=40
+        )
+        api_url_entry.grid(row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=2, padx=5)
+        api_url_entry.bind("<KeyRelease>", self.on_setting_changed)
+        row += 1
+        
+        # API Key
+        ttk.Label(self.params_frame, text="API密钥:").grid(
+            row=row, column=0, sticky=tk.W, pady=2
+        )
+        self.api_key_var = tk.StringVar(
+            value=model_settings.get("api_key", model_config.get("api_key", ""))
+        )
+        api_key_entry = ttk.Entry(
+            self.params_frame,
+            textvariable=self.api_key_var,
+            width=40,
+            show="*"
+        )
+        api_key_entry.grid(row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=2, padx=5)
+        api_key_entry.bind("<KeyRelease>", self.on_setting_changed)
+        row += 1
+        
+        # 模型名称
+        ttk.Label(self.params_frame, text="模型名称:").grid(
+            row=row, column=0, sticky=tk.W, pady=2
+        )
+        self.model_name_var = tk.StringVar(
+            value=model_settings.get("model", model_config.get("model", ""))
+        )
+        model_name_entry = ttk.Entry(
+            self.params_frame,
+            textvariable=self.model_name_var,
+            width=40
+        )
+        model_name_entry.grid(row=row, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=2, padx=5)
+        model_name_entry.bind("<KeyRelease>", self.on_setting_changed)
+        row += 1
+        
+        # 模型描述
+        description = model_config.get("description", "")
+        if description:
+            ttk.Label(self.params_frame, text="描述:", font=("", 8)).grid(
+                row=row, column=0, sticky=tk.W, pady=2
+            )
+            ttk.Label(self.params_frame, text=description, font=("", 8), foreground="gray").grid(
+                row=row, column=1, columnspan=2, sticky=tk.W, pady=2, padx=5
+            )
+        
+        self.params_frame.columnconfigure(1, weight=1)
+
+    def test_ai_connection(self):
+        """测试AI连接 - 这会触发模型初始化"""
+        selected_model = self.ai_model_var.get()
+        if selected_model not in self.ai_models:
+            return
+            
+        # 获取当前配置
+        config = {
+            "base_url": self.api_url_var.get(),
+            "api_key": self.api_key_var.get(),
+            "model": self.model_name_var.get()
+        }
+        
+        # 禁用按钮
+        self.test_btn.config(state="disabled")
+        self.test_btn.config(text="测试中...")
+        
+        def test_in_thread():
+            success = self.core.test_ai_connection(selected_model, config)
+            self.window.after(0, lambda: self.on_connection_test_complete(success))
+        
+        threading.Thread(target=test_in_thread, daemon=True).start()
+
+    def on_connection_test_complete(self, success: bool):
+        """连接测试完成回调"""
+        self.test_btn.config(state="normal")
+        if success:
+            self.test_btn.config(text="连接成功")
+            # 测试成功时，更新当前配置
+            selected_model = self.ai_model_var.get()
+            if "model_configs" not in self.settings["sentiment_matching"]:
+                self.settings["sentiment_matching"]["model_configs"] = {}
+            self.settings["sentiment_matching"]["model_configs"][selected_model] = {
+                "base_url": self.api_url_var.get(),
+                "api_key": self.api_key_var.get(),
+                "model": self.model_name_var.get()
+            }
+            # 2秒后恢复文本
+            self.window.after(2000, lambda: self.test_btn.config(text="测试连接"))
+        else:
+            self.test_btn.config(text="连接失败")
+            # 连接失败时，禁用情感匹配
+            self.sentiment_enabled_var.set(False)
+            self.on_setting_changed()
+            # 2秒后恢复文本
+            self.window.after(2000, lambda: self.test_btn.config(text="测试连接"))
+
+    def update_pixel_label(self, *args):
+        """更新像素减少比例标签"""
+        self.pixel_value_label.config(text=f"{self.pixel_reduction_ratio_var.get()}%")
+        self.on_setting_changed()
+    def get_available_fonts(self):
+        """获取可用字体列表，优先显示项目字体"""
+        fonts_dir = os.path.join(self.core.config.BASE_PATH, "assets", "fonts")
+        project_fonts = []
+
+        # 获取项目字体
+        if os.path.exists(fonts_dir):
+            for file in os.listdir(fonts_dir):
+                if file.lower().endswith(('.ttf', '.otf', '.ttc')):
+                    font_name = os.path.splitext(file)[0]
+                    project_fonts.append(font_name)
+        return project_fonts
 
     def on_setting_changed(self, event=None):
         """设置改变时的回调"""
@@ -858,7 +832,6 @@ class ManosabaGUI:
         main_frame.rowconfigure(4, weight=1)
 
         self.update_preview()
-
 
     def setup_menu(self):
         """设置菜单栏"""

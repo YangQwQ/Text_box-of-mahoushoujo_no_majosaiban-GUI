@@ -186,7 +186,6 @@ class ManosabaCore:
         self.config_loader.save_gui_settings(self.gui_settings)
         self.update_status("情感匹配功能已禁用")
 
-
     def _reinitialize_sentiment_analyzer_if_needed(self):
         """检查配置是否有变化，如果有变化则重新初始化"""
         sentiment_settings = self.gui_settings.get("sentiment_matching", {})
@@ -236,7 +235,6 @@ class ManosabaCore:
             }
         }
 
-
     def test_ai_connection(self, client_type: str, config: Dict[str, Any]) -> bool:
         """测试AI连接 - 这会进行模型初始化"""
         try:
@@ -262,31 +260,6 @@ class ManosabaCore:
             # 通知GUI测试失败
             self._notify_gui_status_change(False, False)
             return False
-
-    def _initialize_sentiment_analyzer(self):
-        """初始化情感分析器"""
-        sentiment_settings = self.gui_settings.get("sentiment_matching", {})
-        if sentiment_settings.get("enabled", False):
-            try:
-                client_type = sentiment_settings.get("ai_model", "ollama")
-                model_configs = sentiment_settings.get("model_configs", {})
-                config = model_configs.get(client_type, {})
-                
-                success = self.sentiment_analyzer.initialize(client_type, config)
-                
-                if success:
-                    self.update_status("情感分析器初始化成功")
-                    self.sentiment_analyzer_initialized = True
-                else:
-                    self.update_status("情感分析器初始化失败")
-                    self.sentiment_analyzer_initialized = False
-                    
-            except Exception as e:
-                self.update_status(f"初始化情感分析器失败: {e}")
-                self.sentiment_analyzer_initialized = False
-        else:
-            self.update_status("情感匹配功能未启用")
-            self.sentiment_analyzer_initialized = False
 
     def _get_emotion_by_sentiment(self, text: str) -> int:
         """根据文本情感获取对应的表情索引"""
@@ -389,46 +362,6 @@ class ManosabaCore:
         self.gui_settings = settings
         return self.config_loader.save_gui_settings(settings)
 
-    def generate_preview(self, preview_size=(400, 300)) -> tuple:
-        """生成预览图片和相关信息"""
-        character_name = self.get_character()
-        emotion_count = self.get_current_emotion_count()
-
-        # 确定表情和背景
-        emotion_index = (
-            self._get_random_emotion(emotion_count)
-            if self.selected_emotion is None
-            else self.selected_emotion
-        )
-        background_index = (
-            self.image_processor.get_random_background()
-            if self.selected_background is None
-            else self.selected_background
-        )
-
-        # 保存预览使用的表情和背景
-        self.preview_emotion = emotion_index
-        self.preview_background = background_index
-
-        # 生成预览图片
-        preview_image = self.image_processor.generate_preview_image(
-            character_name, background_index, emotion_index, preview_size
-        )
-
-        # 构建预览信息 - 显示实际使用的索引值
-        emotion_text = (
-            f"{emotion_index}" if self.selected_emotion is None else f"{emotion_index}"
-        )
-        background_text = (
-            f"{background_index}"
-            if self.selected_background is None
-            else f"{background_index}"
-        )
-
-        info = f"角色: {character_name}\n表情: {emotion_text}\n背景: {background_text}"
-
-        return preview_image, info
-
     def _get_random_emotion(self, emotion_count: int) -> int:
         """随机选择表情（避免连续相同）"""
         if self.last_emotion == -1:
@@ -515,6 +448,46 @@ class ManosabaCore:
                 time.sleep(self.config.KEY_DELAY * (attempt + 1))
 
         return new_clip.strip()
+
+    def generate_preview(self, preview_size=(400, 300)) -> tuple:
+        """生成预览图片和相关信息"""
+        character_name = self.get_character()
+        emotion_count = self.get_current_emotion_count()
+
+        # 确定表情和背景
+        emotion_index = (
+            self._get_random_emotion(emotion_count)
+            if self.selected_emotion is None
+            else self.selected_emotion
+        )
+        background_index = (
+            self.image_processor.get_random_background()
+            if self.selected_background is None
+            else self.selected_background
+        )
+
+        # 保存预览使用的表情和背景
+        self.preview_emotion = emotion_index
+        self.preview_background = background_index
+
+        # 生成预览图片
+        preview_image = self.image_processor.generate_preview_image(
+            character_name, background_index, emotion_index, preview_size
+        )
+
+        # 构建预览信息 - 显示实际使用的索引值
+        emotion_text = (
+            f"{emotion_index}" if self.selected_emotion is None else f"{emotion_index}"
+        )
+        background_text = (
+            f"{background_index}"
+            if self.selected_background is None
+            else f"{background_index}"
+        )
+
+        info = f"角色: {character_name}\n表情: {emotion_text}\n背景: {background_text}"
+
+        return preview_image, info
 
     def generate_image(self) -> str:
         """生成并发送图片"""

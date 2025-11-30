@@ -15,7 +15,7 @@ class SentimentAnalyzer:
 
 规则：
 1. 只返回情感词汇，不要添加其他内容
-2. 如果情感不明显，选择最接近的选项
+2. 文本可能不构成完整句子，需要推测前后文
 3. 如果确实无法判断，返回"无感情"
 
 请严格按照这个格式回复，现在请回复"好的"以确认你理解了规则。"""
@@ -79,7 +79,7 @@ class SentimentAnalyzer:
     # 其余方法保持不变，只是移除旧的初始化相关代码
     def _check_initialization_response(self, response: str) -> bool:
         """检查初始化回复是否成功"""
-        confirmation_keywords = ['好的', '明白', '了解', '知道了', '没问题', '确认', 'ok', 'okay', 'yes', '理解']
+        confirmation_keywords = ['好的', '明白', '了解']
         response_lower = response.lower()
         
         for keyword in confirmation_keywords:
@@ -105,26 +105,6 @@ class SentimentAnalyzer:
         for emotion in self.emotion_list:
             if emotion in cleaned_response:
                 return emotion
-        
-        # 如果直接匹配失败，尝试更宽松的匹配
-        response_lower = response.lower()
-        emotion_mapping = {
-            '愤怒': ['愤怒', '生气', '气愤'],
-            '嫌弃': ['嫌弃', '讨厌', '厌恶'],
-            '疑惑': ['疑惑', '困惑', '疑问'],
-            '惊讶': ['惊讶', '吃惊', '惊奇'],
-            '伤心': ['伤心', '悲伤', '难过'],
-            '害羞': ['害羞', '羞涩', '不好意思'],
-            '开心': ['开心', '高兴', '快乐', '愉快'],
-            '恐惧': ['恐惧', '害怕', '恐怖'],
-            '无语': ['无语', '无奈'],
-            '大笑': ['大笑', '哈哈', '笑死']
-        }
-        
-        for emotion, keywords in emotion_mapping.items():
-            for keyword in keywords:
-                if keyword in response_lower:
-                    return emotion
         
         return None
     

@@ -104,11 +104,7 @@ class ConfigLoader:
             "font_size": 110,
             "quick_characters": {},
             "sentiment_matching": {
-                "enabled": False,
-                "ai_model": "ollama",
-                "api_url": "http://localhost:11434/v1/",
-                "model_name": "qwen2.5",
-                "api_key": ""  # 新增API Key字段
+                "enabled": False
             },
             "image_compression": {
                 "pixel_reduction_enabled": True,
