@@ -88,12 +88,14 @@
 5. 表情匹配设置：
    - 表情匹配功能默认关闭，需要在设置中开启
    - 可以下载ollama运行本地模型，也可以使用deepseek的api，需要其它模型的话请自行在setting.yml里面添加
-   - 情感分析模型推荐使用ollama，但是可能没有deepseek准确
+   - 情感匹配推荐使用ollama运行OmniDimen-4B-Emotion模型（我感觉又快又准）
 6. ollama本地模型配置教程：
    - 下载并安装[ollama](https://ollama.com/download)
-   - 运行ollama，选择一个带得动的模型运行，总之我用的`qwen2.5`
-   - 模型下载完毕后，在cmd执行`ollama serve`，程序有开着似乎也行(但是每次重启程序都要等ollama启动)
-   - 在设置内选择使用ollama，模型名称填写为你下载的那个，然后点击测试链接，或在主界面点击情感匹配并等待连接即可
+   - 如果不希望ollama把模型下载在c盘或者需要模型一直运行，需要设置环境变量，如图：
+     <img width="272" height="67" alt="image" src="https://github.com/user-attachments/assets/78dfed24-be05-4af5-89f3-489908cb12c0" />
+   - 运行`ollama run hf.co/OmniDimen/OmniDimen-4B-Emotion-GGUF-q4_K_M:Q4_K_M`然后等待模型下载完毕，这个模型在情感分析方面效率较高，推荐使用（分析时间大概500ms）
+   - 模型下载完毕后，在cmd执行`ollama serve`，程序有开着似乎也行
+   - 在设置内选择使用ollama，模型名称填写为`hf.co/OmniDimen/OmniDimen-4B-Emotion-GGUF-q4_K_M:Q4_K_M`，然后点击测试链接，或在主界面点击情感匹配并等待连接即可
 
 ### 添加自定义角色
 ***
@@ -150,10 +152,11 @@ warden:
 另外，若要使用角色，请下载对应角色文件夹并放到项目文件夹的`assets/chara`文件夹中
 
 ## To-Do List
-1. 优化ai匹配表情时的开销 (v1.5)
-2. 提升表情匹配准确性 (v1.5)
-3. 程序界面外观优化? (v1.6)
-4. 兼容TUI (暂无计划)
+1. 添加全局配置实例，统一管理所有配置 (v1.5)
+2. 调整部分逻辑，比如启用情感匹配后预览不该随机刷新？ (v1.5)
+3. 调整情感列表(感觉目前的分类不是很好用) (v1.5)
+4. 程序界面外观优化? (v1.6)
+5. 支持编辑人物名字的文字样式以及微调人物位置(v1.8)
 
 ## BUG记录
 1. 强调字符只有半边时着色有问题（暂时没想着修）
