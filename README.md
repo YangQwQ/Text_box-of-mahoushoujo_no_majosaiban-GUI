@@ -2,17 +2,6 @@
 
 一个基于Python的自动化表情包生成工具，能够快速生成带有自定义文本的魔法少女的魔女裁判文本框图片。[灵感来源与代码参考](https://github.com/MarkCup-Official/Anan-s-Sketchbook-Chat-Box)
 
-## To-Do List
-1. 优化ai匹配表情时的开销 (v1.5)
-2. 提升表情匹配准确性 (v1.5)
-3. 程序界面外观优化? (v1.6)
-4. 兼容TUI (暂无计划)
-
-## BUG记录
-1. 强调字符只有半边时着色有问题（暂时没想着修）
-2. 复杂的组合emoji无法正常显示，比如 👨‍👩‍👧‍👦 👨🏻‍👩🏼‍👧🏽‍👦🏾
-3. 快捷键编辑页无法用滚轮滚动
-
 ## 修改说明
 本仓库由YangQwQ基于[oplivilqo的项目](https://github.com/oplivilqo/manosaba_text_box)二次开发，基于Tkinter实现了图形化用户界面以及其它实用功能
 
@@ -39,11 +28,17 @@
 1. 目前程序还有很多细节部分会在后续优化
 2. 有想法随便提，有意思的我会尽力实现
 3. 代码是deepseek写的，补药喷我
+4. 有bug请及时反馈
 
 ## 预览
 <img width="1200" height="390" alt="5f10f4239bc8a82812e505fd0c4f5567" src="https://github.com/user-attachments/assets/6fb46a8d-4fc4-4d10-80a0-ed21fbb428bf" />
 
 <img width="1200" height="390" alt="96038673678af657e937d20617322e81" src="https://github.com/user-attachments/assets/847c331e-9274-4b60-9b42-af0a80265391" />
+
+<img width="1280" height="417" alt="abf11ca9-c7e2-45d4-be8b-68ad01626c8e" src="https://github.com/user-attachments/assets/86af2653-99d9-4ed3-99a6-f21380102b93" />
+
+<img width="1280" height="417" alt="ad619121-fffb-407e-8428-a8011b006130" src="https://github.com/user-attachments/assets/0643f205-6fa6-456f-96c6-2fdafda6152e" />
+
 
 
 一个基于Python的自动化表情包生成工具，能够快速生成带有自定义文本的魔法少女的魔女裁判文本框图片。[灵感来源与代码参考](https://github.com/MarkCup-Official/Anan-s-Sketchbook-Chat-Box)
@@ -154,6 +149,17 @@ warden:
 ```
 另外，若要使用角色，请下载对应角色文件夹并放到项目文件夹的`assets/chara`文件夹中
 
+## To-Do List
+1. 优化ai匹配表情时的开销 (v1.5)
+2. 提升表情匹配准确性 (v1.5)
+3. 程序界面外观优化? (v1.6)
+4. 兼容TUI (暂无计划)
+
+## BUG记录
+1. 强调字符只有半边时着色有问题（暂时没想着修）
+2. 复杂的组合emoji无法正常显示，比如 👨‍👩‍👧‍👦 👨🏻‍👩🏼‍👧🏽‍👦🏾
+3. 快捷键编辑页无法用滚轮滚动
+
 ## 更新日志
 
 ### v1.5
@@ -241,6 +247,7 @@ warden:
 <div align="right">
   
 ### 以上. 柊回文————2025.11.15
+
 
 
 
