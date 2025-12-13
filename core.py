@@ -14,8 +14,7 @@ import psutil
 import threading
 from pynput.keyboard import Key, Controller
 from sys import platform
-import keyboard as kb_module
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw
 from typing import Dict, Any
 
 if platform.startswith("win"):
@@ -96,22 +95,8 @@ class ManosabaCore:
         # 1. 创建一个2560x854的空白图片（透明背景）
         canvas = Image.new("RGBA", (2560, 854), (0, 0, 0, 0))
         
-        # 2. 加载背景图（支持多格式）
-        supported_formats = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp']
-        background_path = None
-        
-        for ext in supported_formats:
-            test_path = get_resource_path(os.path.join("assets", "background", f"c{background_index}{ext}"))
-            if os.path.exists(test_path):
-                background_path = test_path
-                break
-        
-        if background_path is None:
-            # 如果所有格式都不存在，使用默认png格式
-            background_path = get_resource_path(os.path.join("assets", "background", f"c{background_index}.png"))
-        
-        # 使用背景缓存函数（已包含缩放功能）
-        background = load_background_safe(background_path, default_size=(2560, 854), default_color=(100, 100, 200))
+        # 2. 加载背景图（使用简化函数）
+        background = load_background_safe(f"c{background_index}", default_size=(2560, 854), default_color=(100, 100, 200))
         
         # 计算背景图粘贴位置（底部对齐、水平居中）
         bg_x = (canvas.width - background.width) // 2  # 水平居中
@@ -144,26 +129,8 @@ class ManosabaCore:
             # 使用alpha_composite进行正确的alpha混合
             canvas = Image.alpha_composite(canvas, textbox_layer)
         
-        # 4. 加载角色图片（支持多种格式）
-        base_path = get_resource_path(os.path.join(
-            "assets",
-            "chara",
-            character_name,
-            f"{character_name} ({emotion_index})"
-        ))
-        
-        overlay_path = None
-        for ext in ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp']:
-            test_path = base_path + ext
-            if os.path.exists(test_path):
-                overlay_path = test_path
-                break
-        
-        if overlay_path is None:
-            # 如果所有格式都不存在，使用默认png格式
-            overlay_path = base_path + '.png'
-        
-        overlay = load_character_safe(overlay_path, default_size=(800, 600), default_color=(0, 0, 0, 0), emotion_index=emotion_index)
+        # 4. 加载角色图片（使用简化函数）
+        overlay = load_character_safe(character_name, emotion_index, default_size=(800, 600), default_color=(0, 0, 0, 0))
         
         # 计算角色图片粘贴位置（左下角对齐，相对于整个画布）
         chara_x = 0  # 左下角对齐，x坐标为0
@@ -573,8 +540,12 @@ class ManosabaCore:
         time.sleep(0.005)
 
         if platform.startswith("win"):
-            kb_module.send("ctrl+a")
-            kb_module.send("ctrl+x")
+            self.kbd_controller.press(Key.ctrl)
+            self.kbd_controller.press('a')
+            self.kbd_controller.release('a')
+            self.kbd_controller.press('x')
+            self.kbd_controller.release('x')
+            self.kbd_controller.release(Key.ctrl)
         else:
             self.kbd_controller.press(Key.cmd)
             self.kbd_controller.press("a")

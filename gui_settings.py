@@ -618,66 +618,106 @@ class SettingsWindow:
         self._config_thread.start()
 
     def _key_config_listener(self, key, ori_key):
-        """按键配置监听线程"""
-        import keyboard
+        """按键配置监听线程 - 使用 pynput"""
+        from pynput import keyboard as pynput_kb
         
         hotkey_var = getattr(self, f"{key}_hotkey_var")
         
-        try:
-            # 监听按键，直到有组合键按下
-            recorded = keyboard.read_hotkey()
-            
-            # 如果按下ESC键，恢复原来的快捷键
-            if recorded == 'esc':
-                def restore_original():
-                    hotkey_var.set(ori_key)
-                self.window.after(0, restore_original)
-                return
-            
-            # 转换按键格式
-            def update_display():
-                converted = self._convert_keyboard_lib_format(recorded)
-                hotkey_var.set(converted)
-            
-            self.window.after(0, update_display)
+        # 设置初始文本
+        hotkey_var.set("请按下按键组合...")
         
-        except Exception as e:
-            print(f"按键配置监听出错: {e}")
+        # 存储按下的键
+        pressed_keys = []
+        listener = None
+        
+        def on_press(key):
+            try:
+                # 处理特殊键
+                if hasattr(key, 'name'):
+                    if key.name in ['ctrl_l', 'ctrl_r']:
+                        key_str = 'ctrl'
+                    elif key.name in ['alt_l', 'alt_r']:
+                        key_str = 'alt'
+                    elif key.name in ['shift_l', 'shift_r']:
+                        key_str = 'shift'
+                    elif key.name in ['cmd_l', 'cmd_r']:
+                        key_str = 'cmd' if CONFIGS.platform == 'darwin' else 'win'
+                    elif key.name.startswith('f') and key.name[1:].isdigit():
+                        key_str = key.name
+                    else:
+                        key_str = key.name
+                else:
+                    # 处理普通键
+                    if hasattr(key, 'char') and key.char:
+                        key_str = key.char
+                    else:
+                        key_str = str(key).replace("'", "")
+                
+                if key_str not in pressed_keys:
+                    pressed_keys.append(key_str)
+                    
+                # 更新显示
+                def update_display():
+                    if pressed_keys:
+                        # 转换格式
+                        converted = self._convert_pynput_keys_to_hotkey_string(pressed_keys)
+                        hotkey_var.set(converted)
+                
+                self.window.after(0, update_display)
+                
+            except Exception as e:
+                print(f"按键处理错误: {e}")
+        
+        def on_release(key):
+            # 当释放按键时停止监听
+            return False
+        
+        # 启动监听器
+        listener = pynput_kb.Listener(on_press=on_press, on_release=on_release)
+        listener.start()
+        
+        # 等待一段时间让用户按下按键
+        import time
+        time.sleep(2)  # 等待2秒让用户输入
+        
+        # 停止监听
+        if listener:
+            listener.stop()
+        
+        # 如果没有按键被按下，恢复原来的值
+        if not pressed_keys:
             def restore_original():
                 hotkey_var.set(ori_key)
             self.window.after(0, restore_original)
 
-    def _convert_keyboard_lib_format(self, hotkey_str):
-        """将keyboard库的热键字符串转换为我们的格式"""
-        if not hotkey_str:
-            return ""
-        
+    def _convert_pynput_keys_to_hotkey_string(self, key_list):
+        """将pynput按键列表转换为热键字符串"""
         parts = []
-        for part in hotkey_str.lower().split('+'):
-            part = part.strip()
-            
-            # 处理修饰键
-            if part in ['ctrl', 'ctrl_l', 'ctrl_r']:
-                parts.append('ctrl')
-            elif part in ['alt', 'alt_l', 'alt_r']:
-                parts.append('alt')
-            elif part in ['shift', 'shift_l', 'shift_r']:
-                parts.append('shift')
-            elif part in ['windows', 'win', 'win_l', 'win_r']:
-                parts.append('win')
-            elif len(part) == 1:
-                # 单个字符
-                parts.append(part)
-            elif part in ['left', 'right', 'up', 'down']:
-                # 方向键
-                parts.append(part)
-            elif part.startswith('f') and part[1:].isdigit():
-                # 功能键
-                parts.append(part)
+        for key in key_list:
+            key_str = str(key).lower()
+            if key_str in ['ctrl', 'control']:
+                parts.append('<ctrl>')
+            elif key_str in ['alt', 'menu']:
+                parts.append('<alt>')
+            elif key_str in ['shift']:
+                parts.append('<shift>')
+            elif key_str in ['win', 'windows', 'cmd', 'command']:
+                if CONFIGS.platform == 'darwin':
+                    parts.append('<cmd>')
+                else:
+                    parts.append('<win>')
+            elif key_str.startswith('f') and key_str[1:].isdigit():
+                parts.append(f'<{key_str}>')
+            elif key_str in ['space', 'enter', 'esc', 'tab', 'backspace', 'delete', 'insert', 
+                            'pageup', 'pagedown', 'home', 'end', 'left', 'right', 'up', 'down']:
+                parts.append(f'<{key_str}>')
+            elif len(key_str) == 1 and key_str.isalnum():
+                parts.append(key_str)
             else:
-                # 其他特殊键
-                parts.append(part)
+                # 其他键尝试直接使用
+                parts.append(key_str)
         
+        # 组合成pynput格式的热键字符串
         return '+'.join(parts)
 
     def _test_ai_connection(self):

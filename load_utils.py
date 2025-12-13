@@ -17,6 +17,37 @@ _character_cache = {}   # 角色图片缓存（可释放）
 _general_image_cache = {}  # 通用图片缓存
 
 
+def get_image_path(base_name: str, sub_dir: str = "", with_ext: bool = True) -> str:
+    """获取图片路径，支持多种格式"""
+    supported_formats = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp']
+    
+    for ext in supported_formats:
+        if sub_dir:
+            path = get_resource_path(os.path.join("assets", sub_dir, f"{base_name}{ext}"))
+        else:
+            path = get_resource_path(f"{base_name}{ext}")
+        
+        if os.path.exists(path):
+            return path if with_ext else path[:-len(ext)]
+    
+    # 如果所有格式都不存在，返回默认png格式的路径
+    if sub_dir:
+        return get_resource_path(os.path.join("assets", sub_dir, f"{base_name}.png"))
+    else:
+        return get_resource_path(f"{base_name}.png")
+
+
+def get_background_path(background_name: str) -> str:
+    """获取背景图片路径"""
+    return get_image_path(background_name, "background")
+
+
+def get_character_path(character_name: str, emotion_index: int) -> str:
+    """获取角色图片路径"""
+    base_name = f"{character_name} ({emotion_index})"
+    return get_image_path(base_name, os.path.join("chara", character_name))
+
+
 # 预加载状态管理类
 class PreloadManager:
     """预加载管理器"""
@@ -96,32 +127,9 @@ class PreloadManager:
                     self.update_status(f"角色 {character_name} 预加载被新任务中断")
                     return
                 
-                # 支持多种图片格式
-                supported_formats = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp']
-                overlay_path = None
-                
-                for ext in supported_formats:
-                    test_path = get_resource_path(os.path.join(
-                        "assets",
-                        "chara",
-                        character_name,
-                        f"{character_name} ({emotion_index}){ext}"
-                    ))
-                    if os.path.exists(test_path):
-                        overlay_path = test_path
-                        break
-                
-                # 如果所有格式都不存在，使用默认png格式（保持向后兼容）
-                if overlay_path is None:
-                    overlay_path = get_resource_path(os.path.join(
-                        "assets",
-                        "chara",
-                        character_name,
-                        f"{character_name} ({emotion_index}).png"
-                    ))
-                
-                # 预加载到缓存
-                load_character_safe(overlay_path, emotion_index=emotion_index)
+                # 获取角色图片路径并预加载
+                overlay_path = get_character_path(character_name, emotion_index)
+                load_character_safe(character_name, emotion_index)
                 
                 # 更新已加载项目数
                 with self._lock:
@@ -170,25 +178,8 @@ class PreloadManager:
                 background_count = CONFIGS.background_count
                 
                 for background_index in range(1, background_count + 1):
-                    # 尝试加载多种格式的背景图片
-                    background_path = None
-                    
-                    # 支持的图片格式列表
-                    supported_formats = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp']
-                    
-                    for ext in supported_formats:
-                        # 尝试构建不同格式的路径
-                        test_path = get_resource_path(os.path.join("assets", "background", f"c{background_index}{ext}"))
-                        if os.path.exists(test_path):
-                            background_path = test_path
-                            break
-                    
-                    if background_path:
-                        load_background_safe(background_path)
-                    else:
-                        # 如果所有格式都不存在，尝试默认png格式（保持向后兼容）
-                        default_path = get_resource_path(os.path.join("assets", "background", f"c{background_index}.png"))
-                        load_background_safe(default_path)
+                    # 预加载背景图片
+                    load_background_safe(f"c{background_index}")
                     
                     # 实时更新进度
                     progress = background_index / background_count
@@ -271,7 +262,6 @@ def load_font_cached(font_name: str, size: int) -> ImageFont.FreeTypeFont:
     return _font_cache[cache_key]
 
 
-
 def load_image_cached(image_path: str) -> Image.Image:
     """通用图片缓存加载，支持透明通道"""
     cache_key = image_path
@@ -283,28 +273,28 @@ def load_image_cached(image_path: str) -> Image.Image:
     return _general_image_cache[cache_key].copy()
 
 
-
 # 安全加载背景图片（文件不存在时返回默认值）
-def load_background_safe(image_path: str, default_size: tuple = (800, 600), default_color: tuple = (100, 100, 200)) -> Image.Image:
+def load_background_safe(background_name: str, default_size: tuple = (800, 600), default_color: tuple = (100, 100, 200)) -> Image.Image:
     """安全加载背景图片，文件不存在时返回默认图片，加载后等比缩放到宽度2560"""
+    # 获取背景图片路径
+    background_path = get_background_path(background_name)
+    
     try:
-        # 直接从缓存加载
-        cache_key = image_path
+        cache_key = background_path
         if cache_key not in _background_cache:
-            if image_path and os.path.exists(image_path):
-                img = Image.open(image_path).convert("RGBA")
+            if os.path.exists(background_path):
+                img = Image.open(background_path).convert("RGBA")
                 
                 # 等比缩放到宽度2560
                 target_width = 2560
                 if img.width != target_width:
-                    # 计算缩放比例和新高度
                     width_ratio = target_width / img.width
                     new_height = int(img.height * width_ratio)
                     img = img.resize((target_width, new_height), Image.Resampling.LANCZOS)
                 
                 _background_cache[cache_key] = img
             else:
-                raise FileNotFoundError(f"背景图片文件不存在: {image_path}")
+                raise FileNotFoundError(f"背景图片文件不存在: {background_path}")
         return _background_cache[cache_key].copy()
     except FileNotFoundError:
         # 创建默认图片，并缩放到宽度2560
@@ -319,15 +309,19 @@ def load_background_safe(image_path: str, default_size: tuple = (800, 600), defa
         
         return default_img
 
+
 # 安全加载角色图片（文件不存在时返回默认值）
-def load_character_safe(image_path: str, default_size: tuple = (800, 600), default_color: tuple = (0, 0, 0, 0), emotion_index: int = 0) -> Image.Image:
+def load_character_safe(character_name: str, emotion_index: int, default_size: tuple = (800, 600), default_color: tuple = (0, 0, 0, 0)) -> Image.Image:
     """安全加载角色图片，文件不存在时返回默认图片"""
+    # 获取角色图片路径
+    character_path = get_character_path(character_name, emotion_index)
+    
     try:
         # 生成不区分格式的缓存键（移除文件扩展名）
-        cache_key = image_path.rsplit('.', 1)[0]  # 移除扩展名
+        cache_key = character_path.rsplit('.', 1)[0]  # 移除扩展名
         if cache_key not in _character_cache:
-            if image_path and os.path.exists(image_path):
-                img = Image.open(image_path).convert("RGBA")
+            if os.path.exists(character_path):
+                img = Image.open(character_path).convert("RGBA")
                 
                 # 应用缩放
                 scale = CONFIGS.current_character.get("scale", 1.0)
@@ -358,11 +352,12 @@ def load_character_safe(image_path: str, default_size: tuple = (800, 600), defau
                     
                 _character_cache[cache_key] = result
             else:
-                raise FileNotFoundError(f"角色图片文件不存在: {image_path}")
+                raise FileNotFoundError(f"角色图片文件不存在: {character_path}")
         return _character_cache[cache_key].copy()
     except FileNotFoundError:
         # 创建默认透明图片
         return Image.new("RGBA", default_size, default_color)
+
 
 def load_image_safe(image_path: str, default_size: tuple = (800, 600), default_color: tuple = (100, 100, 200)) -> Image.Image:
     """安全加载图片，文件不存在时返回默认图片"""
@@ -372,10 +367,21 @@ def load_image_safe(image_path: str, default_size: tuple = (800, 600), default_c
         # 创建默认图片
         return Image.new("RGBA", default_size, default_color)
 
+
 def load_resource_image(relative_path: str) -> Image.Image:
     """获取资源路径并加载图片"""
     image_path = get_resource_path(relative_path)
     return load_image_cached(image_path)
+
+
+# 创建全局预加载管理器实例
+_preload_manager = PreloadManager()
+
+
+def get_preload_manager() -> PreloadManager:
+    """获取预加载管理器实例"""
+    return _preload_manager
+
 
 def clear_all_cache():
     """清理所有缓存以释放内存"""
@@ -385,10 +391,12 @@ def clear_all_cache():
     _character_cache.clear()
     _general_image_cache.clear()
 
+
 def clear_character_cache():
     """清理角色图片缓存以释放内存"""
     global _character_cache
     _character_cache.clear()
+
 
 def clear_cache(cache_type: str = "all"):
     """清理特定类型的缓存"""

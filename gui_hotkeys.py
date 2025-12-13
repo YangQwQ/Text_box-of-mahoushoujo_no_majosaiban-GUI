@@ -1,9 +1,7 @@
 """热键管理模块"""
 
-import threading
-import time
 from pynput import keyboard
-from pynput.keyboard import Key, KeyCode, Controller, HotKey
+from pynput.keyboard import Key, Controller
 from load_utils import clear_cache
 from config import CONFIGS
 
@@ -53,17 +51,9 @@ class HotkeyManager:
             print(f"加载热键配置失败: {e}")
             return
         
-        # 创建热键处理函数字典
-        self._hotkey_handlers = {}
-        
         # 为每个热键创建处理函数
         for action, hotkey_str in hotkey_configs.items():
-            # 转换为pynput格式的热键字符串
-            pynput_hotkey = self._convert_to_pynput_format(hotkey_str)
-            if not pynput_hotkey:
-                print(f"无法转换热键: {hotkey_str}")
-                continue
-            
+            pynput_hotkey=hotkey_str
             # 创建处理函数
             if action == "toggle_listener":
                 # 切换监听状态的热键总是可用
@@ -75,49 +65,6 @@ class HotkeyManager:
         # 启动热键监听器
         self._start_listener()
         print(f"热键监听器已启动，平台: {CONFIGS.platform}")
-
-    def _convert_to_pynput_format(self, hotkey_str):
-        """将热键字符串转换为pynput格式"""
-        if not hotkey_str:
-            return None
-        
-        try:
-            parts = []
-            for part in hotkey_str.lower().split('+'):
-                part = part.strip()
-                
-                # 根据平台处理修饰键
-                if part in ['ctrl', 'control']:
-                    parts.append('<ctrl>')
-                elif part in ['alt', 'menu']:
-                    parts.append('<alt>')
-                elif part in ['shift']:
-                    parts.append('<shift>')
-                elif part in ['win', 'windows', 'cmd', 'command']:
-                    # Windows键/Mac Command键
-                    if CONFIGS.platform == 'darwin':  # macOS
-                        parts.append('<cmd>')
-                    else:  # Windows/Linux
-                        parts.append('<win>')
-                elif part.startswith('f') and part[1:].isdigit():
-                    # 功能键 F1-F12
-                    parts.append(f'<{part}>')
-                elif len(part) == 1 and part.isalnum():
-                    # 字母或数字键
-                    parts.append(part)
-                elif part in ['space', 'enter', 'esc', 'tab', 'backspace', 'delete', 'insert', 
-                            'pageup', 'pagedown', 'home', 'end', 'left', 'right', 'up', 'down']:
-                    # 添加方向键支持
-                    parts.append(f'<{part}>')
-                else:
-                    print(f"未知热键部分: {part}")
-                    return None
-            
-            # 组合成pynput格式的热键字符串
-            return '+'.join(parts)
-        except Exception as e:
-            print(f"转换热键格式失败 {hotkey_str}: {e}")
-            return None
 
     def _create_hotkey_handler(self, action, quick_chars):
         """创建热键处理函数"""

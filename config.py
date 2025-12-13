@@ -69,14 +69,14 @@ class ConfigLoader:
         self.process_whitelist = self.load_config("process_whitelist")
 
         self.gui_settings = self.load_config("settings")
-
-        # 设置 display 默认值为 False
-        if "display" not in self.gui_settings["sentiment_matching"]:
-            self.gui_settings["sentiment_matching"]["display"] = False
+        
+        # 直接从配置中获取ai_models，不需要额外处理
         self.ai_models = self.gui_settings.get("sentiment_matching", {}).get("model_configs", {})
         
-        self.gui_settings["sentiment_matching"]["enabled"] &= self.gui_settings["sentiment_matching"]["display"]
-        
+        # 确保enabled只有在display为True时才可能为True
+        sm = self.gui_settings["sentiment_matching"]
+        sm["enabled"] &= sm["display"]
+    
     def reload_configs(self):
         """重新加载配置（用于热键更新后）"""
         # 重新加载快捷键映射
@@ -104,16 +104,118 @@ class ConfigLoader:
         
         # 加载配置文件
         config = self._load_yaml_file(f"{config_type}.yml")
+        
         if config_type in ["keymap", "process_whitelist"]:
-            config = config.get(self.platform, {})
+            # 处理平台特定配置
+            if config:
+                config = config.get(self.platform, {})
+            else:
+                config = self._get_default_setting(config_type)
+        elif config_type == "settings":
+            # 处理settings配置，确保所有字段都存在
+            default_settings = self._get_default_setting("settings")
+            if config:
+                # 递归合并默认值和文件配置
+                config = self._merge_dicts(default_settings, config)
+            else:
+                config = default_settings
+                self.gui_settings = config
+                self.save_gui_settings()
+        
+        return config
+    
+    def _merge_dicts(self, default: Dict, override: Dict) -> Dict:
+        """递归合并两个字典"""
+        result = default.copy()
+        for key, value in override.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._merge_dicts(result[key], value)
+            else:
+                result[key] = value
+        return result
+    
+    def _get_default_setting(self, config_type: str) -> Dict[str, Any]:
+        """获取默认设置"""
+        print(f"获取默认配置：{config_type}")
 
-        if config is None:
-            # 获取默认配置（gui和keymap）
-            if config_type in ["settings", "keymap"]:
-                print(f"警告：{config_type}.yml 不存在，使用默认配置")
-                return self._get_default_gui_settings() if config_type == "settings" else self._get_default_keymap()
+        if config_type == "settings":
+            return {
+                "font_family": "font3",
+                "font_size": 90,
+                "text_color": '#FFFFFF',
+                "bracket_color": '#EF4F54',
+                "image_compression": {
+                    "pixel_reduction_enabled": True,
+                    "pixel_reduction_ratio": 40
+                },
+                "quick_characters": {
+                    "character_1": "ema",
+                    "character_2": "hiro", 
+                    "character_3": "sherry",
+                    "character_4": "yuki",
+                    "character_5": "meruru",
+                    "character_6": "reia"
+                },
+                "sentiment_matching": {
+                    "display": False,
+                    "enabled": False,
+                    "ai_model": "ollama",
+                    "model_configs": {
+                        "chatGPT": {
+                            "api_key": '',
+                            "base_url": "https://api.openai.com/v1/",
+                            "model": "gpt-3.5-turbo"
+                        },
+                        "deepseek": {
+                            "api_key": '',
+                            "base_url": "https://api.deepseek.com",
+                            "model": "deepseek-chat"
+                        },
+                        "ollama": {
+                            "api_key": '',
+                            "base_url": "http://localhost:11434/v1/",
+                            "model": "OmniDimen"
+                        }
+                    }
+                }
+            }
+        elif config_type == "keymap":
+            if self.platform == "win32":
+                return {
+                    "start_generate": "<ctrl>+e",
+                    "next_character": "<ctrl>+<shift>+l",
+                    "prev_character": "<ctrl>+<shift>+j",
+                    "next_emotion": "<ctrl>+<shift>+o",
+                    "prev_emotion": "<ctrl>+<shift>+u",
+                    "next_background": "<ctrl>+<shift>+k",
+                    "prev_background": "<ctrl>+<shift>+i",
+                    "toggle_listener": "<ctrl>+<alt>+p",
+                    "character_1": "<ctrl>+1",
+                    "character_2": "<ctrl>+2",
+                    "character_3": "<ctrl>+3",
+                    "character_4": "<ctrl>+4",
+                    "character_5": "<ctrl>+5",
+                    "character_6": "<ctrl>+6"
+                }
+            elif self.platform == "darwin":
+                return {
+                        "start_generate": "<cmd>+e",
+                        "next_character": "<cmd>+<shift>+l",
+                        "prev_character": "<cmd>+<shift>+j",
+                        "next_emotion": "<cmd>+<shift>+o",
+                        "prev_emotion": "<cmd>+<shift>+u",
+                        "next_background": "<cmd>+<shift>+k",
+                        "prev_background": "<cmd>+<shift>+i",
+                        "toggle_listener": "<cmd>+<alt>+p",
+                        "character_1": "<cmd>+1",
+                        "character_2": "<cmd>+2",
+                        "character_3": "<cmd>+3",
+                        "character_4": "<cmd>+4",
+                        "character_5": "<cmd>+5",
+                        "character_6": "<cmd>+6"
+                    }
         else:
-            return config
+            return {}
 
     def _load_yaml_file(self, filename: str) -> Optional[Dict[str, Any]]:
         """通用YAML文件加载函数"""
@@ -141,59 +243,6 @@ class ConfigLoader:
         except Exception as e:
             print(f"保存配置文件 {filename} 失败: {e}")
             return False
-    
-    def _get_default_keymap(self) -> Dict[str, Any]:
-        """获取默认快捷键配置"""
-        return {
-            "win32": {
-                "start_generate": "ctrl+e",
-                "next_character": "ctrl+shift+l",
-                "prev_character": "ctrl+shift+j",
-                "next_emotion": "ctrl+shift+o",
-                "prev_emotion": "ctrl+shift+u",
-                "next_background": "ctrl+shift+k",
-                "prev_background": "ctrl+shift+i",
-                "toggle_listener": "ctrl+alt+p",
-                "character_1": "ctrl+1",
-                "character_2": "ctrl+2",
-                "character_3": "ctrl+3",
-                "character_4": "ctrl+4",
-                "character_5": "ctrl+5",
-                "character_6": "ctrl+6"
-            },
-            "darwin": {
-                "start_generate": "cmd+e",
-                "next_character": "cmd+shift+l",
-                "prev_character": "cmd+shift+j",
-                "next_emotion": "cmd+shift+o",
-                "prev_emotion": "cmd+shift+u",
-                "next_background": "cmd+shift+k",
-                "prev_background": "cmd+shift+i",
-                "toggle_listener": "cmd+alt+p",
-                "character_1": "cmd+1",
-                "character_2": "cmd+2",
-                "character_3": "cmd+3",
-                "character_4": "cmd+4",
-                "character_5": "cmd+5",
-                "character_6": "cmd+6"
-            }
-        }
-    
-    def _get_default_gui_settings(self) -> Dict[str, Any]:
-        """获取默认GUI设置"""
-        return {
-            "font_family": "font3",
-            "font_size": 110,
-            "quick_characters": {},
-            "sentiment_matching": {
-                "display": False,
-                "enabled": False
-            },
-            "image_compression": {
-                "pixel_reduction_enabled": True,
-                "pixel_reduction_ratio": 50
-            }
-        }
 
     def get_character(self, index: str | None = None, full_name: bool = False) -> str:
         """获取角色名称"""
@@ -205,7 +254,7 @@ class ConfigLoader:
     
     def get_available_models(self) -> Dict[str, Dict[str, Any]]:
         """获取可用模型配置"""
-        # 从配置文件读取模型配置
+        # 直接从配置中获取，无需额外处理
         model_configs = self.gui_settings.get("sentiment_matching", {}).get("model_configs", {})
         
         # 构建模型信息字典
@@ -225,34 +274,15 @@ class ConfigLoader:
                 "description": model_config.get("description", model_descriptions.get(model_type, f"{model_type} AI服务"))
             }
         
-        # 如果没有从配置文件读取到模型，使用默认配置
-        if not available_models:
-            available_models = {
-                "ollama": {
-                    "name": "Ollama",
-                    "base_url": "http://localhost:11434/v1/",
-                    "api_key": "",
-                    "model": "qwen2.5",
-                    "description": "本地运行的Ollama服务"
-                },
-                "deepseek": {
-                    "name": "DeepSeek",
-                    "base_url": "https://api.deepseek.com", 
-                    "api_key": "",
-                    "model": "deepseek-chat",
-                    "description": "DeepSeek在线API"
-                }
-            }
-        
         return available_models
         
-    def save_keymap(self,new_hotkeys=None):
+    def save_keymap(self, new_hotkeys=None):
         """保存快捷键设置到keymap.yml"""
         if new_hotkeys is None:
             return False
             
         # 加载现有配置
-        keymap_data = self._load_yaml_file("keymap.yml") or self._get_default_keymap()
+        keymap_data = self._load_yaml_file("keymap.yml") or {self.platform: self._get_default_setting("keymap")}
         
         # 合并新的快捷键设置到当前平台
         if self.platform not in keymap_data:
@@ -275,15 +305,9 @@ class ConfigLoader:
         
     def save_gui_settings(self):
         """保存GUI设置到settings.yml"""
-        # 如果文件已存在，则先加载现有配置，然后合并
-        existing_settings = self._load_yaml_file("settings.yml") or {}
-        
-        # 合并设置，新的设置覆盖旧的
-        merged_settings = existing_settings.copy()
-        merged_settings.update(self.gui_settings)
-        
-        # 保存回文件
-        return self._save_yaml_file("settings.yml", merged_settings)
+        # 直接保存当前配置
+        return self._save_yaml_file("settings.yml", self.gui_settings)
+
 
 class AppConfig:
     """应用配置类"""

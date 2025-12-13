@@ -74,30 +74,12 @@ hiddenimports = [
     'win32gui',
     'win32process',
     'win32api',
-    'win32con',
-    'pywintypes',
     
     # 键盘和输入
-    'keyboard',
     'pynput',
-    'pynput.keyboard',
     
     # 系统工具
     'psutil',
-    
-    # PIL 图像处理
-    'PIL._tkinter_finder',
-    'PIL._imaging',
-    'PIL.Image',
-    'PIL.ImageTk',
-    'PIL.ImageOps',
-    'PIL.ImageDraw',
-    'PIL.ImageFont',
-    'PIL.PngImagePlugin',  # 添加 PNG 支持
-    'PIL.JpegImagePlugin'
-
-    # 其他必要模块
-    'yaml'
 ]
 
 # 尝试收集一些可能被动态导入的模块
