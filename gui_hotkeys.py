@@ -130,11 +130,12 @@ class HotkeyManager:
     def reload_hotkeys(self):
         """重新加载热键配置"""
         try:
-            # 停止当前监听器
-            if self._listener is not None:
-                self._listener.stop()
-                self._listener = None
+            # 完全停止当前监听器
+            self.stop_hotkey_listener()
             
+            # 等待一小段时间确保监听器完全停止
+            import time
+            time.sleep(0.1)
             # 重新设置热键
             self.setup_hotkeys()
             print("热键配置已重新加载")
@@ -167,7 +168,8 @@ class HotkeyManager:
     
     def switch_emotion(self, direction):
         """切换表情"""
-        self._cancel_sentiment_matching()
+        if CONFIGS.gui_settings["sentiment_matching"].get("display",False):
+            self._cancel_sentiment_matching()
         
         if self.gui.emotion_random_var.get():
             self.gui.emotion_random_var.set(False)
@@ -238,4 +240,6 @@ class HotkeyManager:
         if self._listener is not None:
             self._listener.stop()
             self._listener = None
+
+            self._hotkey_handlers.clear()
             print("热键监听器已停止")

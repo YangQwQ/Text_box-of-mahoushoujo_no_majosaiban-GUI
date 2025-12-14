@@ -318,7 +318,7 @@ class ManosabaGUI:
     def on_emotion_changed(self, event=None):
         """表情改变事件"""
         # 取消情感匹配勾选
-        if self.sentiment_matching_var.get():
+        if CONFIGS.gui_settings["sentiment_matching"].get("display", False) and self.sentiment_matching_var.get():
             self.sentiment_matching_var.set(False)
             self.on_sentiment_matching_changed()
             self.update_status("已取消情感匹配（手动选择表情）")

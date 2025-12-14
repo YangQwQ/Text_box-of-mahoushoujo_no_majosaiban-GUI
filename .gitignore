@@ -1,6 +1,7 @@
 /assets/cache/
 /__pycache__/
 /.vs/
+/.vscode/
 /emoji_png/
 config/settings.yml
 /build/

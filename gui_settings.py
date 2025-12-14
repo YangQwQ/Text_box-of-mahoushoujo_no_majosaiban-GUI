@@ -616,76 +616,127 @@ class SettingsWindow:
             daemon=True
         )
         self._config_thread.start()
-
+        
     def _key_config_listener(self, key, ori_key):
         """按键配置监听线程 - 使用 pynput"""
         from pynput import keyboard as pynput_kb
         
         hotkey_var = getattr(self, f"{key}_hotkey_var")
         
-        # 设置初始文本
-        hotkey_var.set("请按下按键组合...")
-        
-        # 存储按下的键
-        pressed_keys = []
+        # 存储按键组合
+        key_combo = []
         listener = None
+        should_stop = False
         
-        def on_press(key):
+        def on_press(key_obj):
+            nonlocal should_stop
             try:
+                should_stop = False
+                
                 # 处理特殊键
-                if hasattr(key, 'name'):
-                    if key.name in ['ctrl_l', 'ctrl_r']:
-                        key_str = 'ctrl'
-                    elif key.name in ['alt_l', 'alt_r']:
-                        key_str = 'alt'
-                    elif key.name in ['shift_l', 'shift_r']:
-                        key_str = 'shift'
-                    elif key.name in ['cmd_l', 'cmd_r']:
-                        key_str = 'cmd' if CONFIGS.platform == 'darwin' else 'win'
-                    elif key.name.startswith('f') and key.name[1:].isdigit():
-                        key_str = key.name
+                if hasattr(key_obj, 'name'):
+                    # 修饰键处理
+                    if key_obj.name in ['ctrl_l', 'ctrl_r', 'ctrl']:
+                        key_str = '<ctrl>'
+                    elif key_obj.name in ['alt_l', 'alt_r', 'alt']:
+                        key_str = '<alt>'
+                    elif key_obj.name in ['shift_l', 'shift_r', 'shift']:
+                        key_str = '<shift>'
+                    elif key_obj.name in ['cmd_l', 'cmd_r', 'cmd', 'win', 'windows']:
+                        key_str = '<cmd>' if CONFIGS.platform == 'darwin' else '<win>'
+                    elif key_obj.name.startswith('f') and key_obj.name[1:].isdigit():
+                        key_str = f'<{key_obj.name}>'
+                    elif key_obj.name in ['space', 'enter', 'esc', 'tab', 'backspace', 'delete', 'insert',
+                                        'pageup', 'pagedown', 'home', 'end', 'left', 'right', 'up', 'down']:
+                        key_str = f'<{key_obj.name}>'
                     else:
-                        key_str = key.name
+                        # 对于字母键，直接使用名称
+                        if key_obj.name.isalpha() and len(key_obj.name) == 1:
+                            key_str = key_obj.name.lower()
+                        else:
+                            key_str = key_obj.name
                 else:
-                    # 处理普通键
-                    if hasattr(key, 'char') and key.char:
-                        key_str = key.char
+                    # 处理普通字符键 - 这里要特别处理控制字符
+                    if hasattr(key_obj, 'char') and key_obj.char:
+                        # 检查是否是控制字符（ASCII 0-31）
+                        char_val = key_obj.char
+                        if isinstance(char_val, str) and len(char_val) == 1:
+                            code = ord(char_val)
+                            # Ctrl+A 到 Ctrl+Z 对应 1-26
+                            if 1 <= code <= 26:
+                                # 转换为对应字母
+                                key_str = chr(code - 1 + ord('a'))
+                            elif code >= 32:  # 可打印字符
+                                key_str = char_val.lower() if char_val.isalpha() else char_val
+                            else:
+                                key_str = None
+                        else:
+                            key_str = char_val
                     else:
-                        key_str = str(key).replace("'", "")
+                        # 没有字符属性，尝试获取其他表示
+                        try:
+                            key_repr = str(key_obj)
+                            if "'" in key_repr:
+                                key_str = key_repr.strip("'")
+                                # 如果是单字符且为控制字符，特殊处理
+                                if len(key_str) == 1:
+                                    code = ord(key_str)
+                                    if 1 <= code <= 26:
+                                        key_str = chr(code - 1 + ord('a'))
+                            else:
+                                key_str = key_repr.replace('Key.', '')
+                        except:
+                            key_str = str(key_obj)
                 
-                if key_str not in pressed_keys:
-                    pressed_keys.append(key_str)
+                # 去重并添加到组合
+                if key_str and key_str not in key_combo:
+                    key_combo.append(key_str)
                     
-                # 更新显示
-                def update_display():
-                    if pressed_keys:
-                        # 转换格式
-                        converted = self._convert_pynput_keys_to_hotkey_string(pressed_keys)
-                        hotkey_var.set(converted)
-                
-                self.window.after(0, update_display)
-                
+                    # 更新显示
+                    def update_display():
+                        # 确保修饰键在前面
+                        modifiers = [k for k in key_combo if k.startswith('<')]
+                        regular_keys = [k for k in key_combo if not k.startswith('<')]
+                        final_combo = modifiers + regular_keys
+                        display_str = '+'.join(final_combo)
+                        hotkey_var.set(display_str)
+                    
+                    self.window.after(0, update_display)
+                    
             except Exception as e:
                 print(f"按键处理错误: {e}")
         
-        def on_release(key):
-            # 当释放按键时停止监听
-            return False
+        def on_release(key_obj):
+            nonlocal should_stop
+            # 标记需要停止，但不立即停止
+            should_stop = True
+            return True  # 继续监听
+        
+        # 设置初始文本
+        def set_initial_text():
+            hotkey_var.set("请输入按键...")
+        self.window.after(0, set_initial_text)
         
         # 启动监听器
         listener = pynput_kb.Listener(on_press=on_press, on_release=on_release)
         listener.start()
         
-        # 等待一段时间让用户按下按键
         import time
-        time.sleep(2)  # 等待2秒让用户输入
+        start_time = time.time()
         
-        # 停止监听
-        if listener:
+        while listener.running and (time.time() - start_time) < 5:  # 最多等待5秒
+            time.sleep(0.05)
+            
+            if should_stop:
+                print("结束监听")
+                break
+        
+        # 如果监听器还在运行，停止它
+        if listener and listener.running:
             listener.stop()
         
         # 如果没有按键被按下，恢复原来的值
-        if not pressed_keys:
+        if not key_combo:
             def restore_original():
                 hotkey_var.set(ori_key)
             self.window.after(0, restore_original)
@@ -749,14 +800,9 @@ class SettingsWindow:
         if success:
             self.test_btn.config(text="连接成功")
             # 测试成功时，更新当前配置
-            selected_model = self.ai_model_var.get()
             if "model_configs" not in CONFIGS.gui_settings["sentiment_matching"]:
                 CONFIGS.gui_settings["sentiment_matching"]["model_configs"] = {}
-            # CONFIGS.gui_settings["sentiment_matching"]["model_configs"][selected_model] = {
-            #     "base_url": self.api_url_var.get(),
-            #     "api_key": self.api_key_var.get(),
-            #     "model": self.model_name_var.get()
-            # }
+
             # 2秒后恢复文本
             self.window.after(2000, lambda: self.test_btn.config(text="测试连接"))
         else:
@@ -876,6 +922,7 @@ class SettingsWindow:
         self.core._reinitialize_sentiment_analyzer_if_needed()
         
         # 注意：我们不在设置窗口内重启热键监听，由父窗口处理
+        
         return success
 
     def _on_close(self):
@@ -907,7 +954,7 @@ class SettingsWindow:
         success = CONFIGS.save_keymap(new_hotkeys)
         if success:
             # 更新当前配置中的快捷键
-            CONFIGS.keymap = new_hotkeys.copy()
+            CONFIGS.keymap.update(new_hotkeys)
             print(f"热键已保存: {new_hotkeys}")
         
         return success
