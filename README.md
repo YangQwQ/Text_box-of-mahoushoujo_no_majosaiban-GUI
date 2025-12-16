@@ -12,25 +12,41 @@
 因此本项目当前使用分支管理各位老师独具匠心的思路，下面提供各分支的预览与指北，可以根据自己的喜好选择合适的分支：
 
 1. **GUI 用户界面**: 当前的主分支 👈您在这里
-   - 简单易用的用户界面，同时带有预览。适合大多数用户。
+   <details>
+      <summary>GUI界面预览</summary>
    <img width="600" alt="GUI 用户界面" src="https://github.com/user-attachments/assets/7cedbf8f-0124-43af-9314-41f1b5611e9b" />
-
-2. **[LEGACY 古早版本](https://github.com/oplivilqo/manosaba_text_box/tree/legacy)**: `legacy`分支
-   - 纯命令行界面，监听全局快捷键的古早版本，「但是没bug」。
+   </details>
    
-3. **其他 tkinter GUI** (现在还没合并但未来可期)
+   - 简单易用的用户界面，同时带有预览。适合大多数用户。
+   
+2. **[textual TUI](https://github.com/oplivilqo/manosaba_text_box/tree/refresh)**: `refresh`分支
+   <details>
+      <summary>TUI界面预览</summary>
+      <img src="https://github.com/user-attachments/assets/5d1219c4-582f-4573-a605-065d6abc5337" alt="TUI界面截图">
+   </details>
+   
+   - 直接在运行终端展示的用户界面，适合少数喜欢终端UI的用户。但暂时无法实现图片预览。
+
+3. **[JavaScript WebUI](https://github.com/oplivilqo/manosaba_text_box/tree/lite)**: `lite`分支
+   <details>
+      <summary>JS版界面预览</summary>
+      <img src="https://github.com/user-attachments/assets/38d0e142-8707-4f43-b1a8-1bb0bcdbe848" alt="JS版界面截图">
+   </details>
+   
+   - 无需Python环境，使用浏览器实现的版本。适合偶尔生成图片的用户。
+   
+4. **[LEGACY 古早版本](https://github.com/oplivilqo/manosaba_text_box/tree/legacy)**: `legacy`分支
+   - 纯命令行界面，监听全局快捷键的古早版本，「但是没bug」。
+
+5. **其他 tkinter GUI** (现在还没合并但未来可期)
    - 其他使用tkinter实现的GUI用户界面
    - 目前还有两位老师正在爆肝：
       1. @morpheus315 _[PR #32](https://github.com/oplivilqo/manosaba_text_box/pull/32)_: [仓库地址](https://github.com/morpheus315/Text_box-of-mahoushoujo_no_majosaiban-NEO) (已发布Release)
       2. @thgg678 _[PR #23](https://github.com/oplivilqo/manosaba_text_box/pull/23)_: [仓库地址](https://github.com/thgg678/Text_box-of-mahoushoujo_no_majosaiban)
 
-4. **[textual TUI](https://github.com/oplivilqo/manosaba_text_box/tree/refresh)**: `refresh`分支
-   - 直接在运行终端展示的用户界面，适合少数喜欢终端UI的用户。但暂时无法实现图片预览。
-   ![TUI界面截图](https://github.com/user-attachments/assets/5d1219c4-582f-4573-a605-065d6abc5337)
 
-5. **[JavaScript WebUI](https://github.com/oplivilqo/manosaba_text_box/tree/lite)**: `lite`分支
-   - 无需Python环境，使用浏览器实现的版本。适合偶尔生成图片的用户。
-   ![JS版界面截图](https://github.com/user-attachments/assets/38d0e142-8707-4f43-b1a8-1bb0bcdbe848)
+## 使用方法与配置教程
+参阅[项目Wiki页面](https://github.com/oplivilqo/manosaba_text_box/wiki/GUI-%E5%88%86%E6%94%AF-(%E7%94%A8%E6%88%B7%E7%95%8C%E9%9D%A2))
 
 ## GUI 介绍
 ### 功能特色
@@ -43,11 +59,16 @@
 - 🔍 实时生成 - 图片缓存在内存中，不占硬盘空间
 - 🔧 高度定制 - 支持自定义角色导入，可配置角色差分和背景是否随机等
 
-### 程序界面  
+### 界面预览
+<details>
+   <summary>GUI 用户界面</summary>
 <img width="600" alt="GUI 用户界面" src="https://github.com/user-attachments/assets/7cedbf8f-0124-43af-9314-41f1b5611e9b" />
+</details>
 
-### 设置界面  
+<details>
+   <summary>GUI 设置界面</summary>
 <img width="600" alt="GUI 设置界面" src="https://github.com/user-attachments/assets/474b6a0f-dd80-40a3-b305-81174317e469" />
+</details>
 
 ## 使用方法与配置教程
 参阅[项目Wiki页面](https://github.com/oplivilqo/manosaba_text_box/wiki/GUI-%E5%88%86%E6%94%AF-(%E7%94%A8%E6%88%B7%E7%95%8C%E9%9D%A2))
@@ -69,4 +90,5 @@
 <div align="right">
   
 ### _以上. 柊回文_
+
 
