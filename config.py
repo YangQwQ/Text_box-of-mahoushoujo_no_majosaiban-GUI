@@ -24,7 +24,10 @@ class ConfigLoader:
         else:
             self.platform = 'win32'
 
-        #当前预览相关
+        # 情感匹配相关
+        self.emotion_list = ["平静", "喜悦", "喜爱", "惊讶", "困惑", "无语", "悲伤", "愤怒", "恐惧"]
+
+        # 当前预览相关
         self.current_character_index = 2
 
         # 状态变量(为None时为随机选择,否则为手动选择)
@@ -36,7 +39,7 @@ class ConfigLoader:
         # 设置版本号属性
         self.version = self.version_info["version"] #没有就直接报错吧
 
-        #配置加载
+        # 配置加载
         self.mahoshojo = {}
         self.text_configs_dict = {}
         self.character_list = []

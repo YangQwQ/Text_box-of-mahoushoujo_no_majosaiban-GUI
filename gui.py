@@ -37,12 +37,17 @@ class ManosabaGUI:
         self.setup_gui()
         self.root.bind("<Configure>", self.on_window_resize)
 
-        self.update_status("就绪 - 等待生成预览")
         self.hotkey_manager.setup_hotkeys()
 
         # 根据初始状态设置按钮可用性
         self.update_sentiment_button_state()
 
+        # 根据随机表情状态设置情感筛选下拉框状态
+        if self.emotion_random_var.get():
+            self.sentiment_filter_combo.config(state="disabled")
+        else:
+            self.sentiment_filter_combo.config(state="readonly")
+            
         # 开始预加载状态检查
         self.check_preload_status()
 
@@ -122,9 +127,20 @@ class ManosabaGUI:
         )
         emotion_random_cb.grid(row=0, column=0, sticky=tk.W, padx=5)
 
+        # 情感筛选下拉框（新增）
+        ttk.Label(emotion_frame, text="表情筛选:").grid(
+            row=0, column=1, sticky=tk.W, padx=5
+        )
+        self.sentiment_filter_var = tk.StringVar()
+        self.sentiment_filter_combo = ttk.Combobox(
+            emotion_frame, textvariable=self.sentiment_filter_var, state="readonly", width=15
+        )
+        self.sentiment_filter_combo.grid(row=0, column=2, sticky=(tk.W, tk.E), padx=5)
+        self.sentiment_filter_combo.bind("<<ComboboxSelected>>", self.on_sentiment_filter_changed)
+        
         # 表情下拉框
         ttk.Label(emotion_frame, text="指定表情:").grid(
-            row=0, column=1, sticky=tk.W, padx=5
+            row=0, column=3, sticky=tk.W, padx=5
         )
         self.emotion_var = tk.StringVar()
         self.emotion_combo = ttk.Combobox(
@@ -135,11 +151,13 @@ class ManosabaGUI:
             f"表情 {i}" for i in range(1, emotion_count + 1)
         ]
         self.emotion_combo.set("表情 1")
-        self.emotion_combo.grid(row=0, column=2, sticky=(tk.W, tk.E), padx=5)
+        self.emotion_combo.grid(row=0, column=4, sticky=(tk.W, tk.E), padx=5)
         self.emotion_combo.bind("<<ComboboxSelected>>", self.on_emotion_changed)
         self.emotion_combo.config(state="disabled")
 
+        # 配置列权重
         emotion_frame.columnconfigure(2, weight=1)
+        emotion_frame.columnconfigure(4, weight=1)
 
         # 背景选择框架
         background_frame = ttk.LabelFrame(main_frame, text="背景选择", padding="5")
@@ -237,6 +255,7 @@ class ManosabaGUI:
         main_frame.rowconfigure(4, weight=1)
 
         self.update_preview()
+        self.update_sentiment_filter_combo()
 
     def setup_menu(self):
         """设置菜单栏"""
@@ -277,6 +296,76 @@ class ManosabaGUI:
         """更新预览"""
         self.preview_manager.update_preview()
 
+    def update_sentiment_filter_combo(self):
+        """更新情感筛选下拉框的选项"""
+        character_name = CONFIGS.get_character()
+        character_meta = CONFIGS.mahoshojo.get(character_name, {})
+        
+        # 获取所有可用的情感列表
+        available_sentiments = ["全部表情"]
+        
+        for sentiment in CONFIGS.emotion_list:
+            # 检查该情感是否有对应的表情索引
+            emotion_indices = character_meta.get(sentiment, [])
+            if emotion_indices:  # 只有有可用表情的情感才添加
+                available_sentiments.append(sentiment)
+        
+        # 更新下拉框选项
+        self.sentiment_filter_combo["values"] = available_sentiments
+        
+        # 根据随机表情状态设置下拉框状态
+        if self.emotion_random_var.get():
+            self.sentiment_filter_combo.config(state="disabled")
+        else:
+            self.sentiment_filter_combo.config(state="readonly")
+        
+        # 设置默认值
+        self.sentiment_filter_combo.set("全部表情")
+
+    def on_sentiment_filter_changed(self, event=None):
+        """情感筛选改变事件"""
+        # 如果随机表情启用，则不执行筛选
+        if self.emotion_random_var.get():
+            return
+        
+        selected_sentiment = self.sentiment_filter_var.get()
+        character_name = CONFIGS.get_character()
+        character_meta = CONFIGS.mahoshojo.get(character_name, {})
+        
+        if selected_sentiment == "全部表情":
+            # 显示所有表情
+            emotion_count = CONFIGS.current_character["emotion_count"]
+            self.emotion_combo["values"] = [
+                f"表情 {i}" for i in range(1, emotion_count + 1)
+            ]
+        else:
+            # 获取该情感对应的表情索引列表
+            emotion_indices = character_meta.get(selected_sentiment, [])
+            if emotion_indices:
+                # 更新表情下拉框为可用表情
+                self.emotion_combo["values"] = [
+                    f"表情 {i}" for i in emotion_indices
+                ]
+            else:
+                # 如果没有可用表情，清空下拉框
+                self.emotion_combo["values"] = []
+        
+        # 如果有选项，设置第一个为默认
+        if self.emotion_combo["values"]:
+            self.emotion_combo.set(self.emotion_combo["values"][0])
+            if not self.emotion_random_var.get():  # 只有在非随机模式下才更新选中
+                try:
+                    emotion_index = int(self.emotion_combo.get().split()[-1])
+                    CONFIGS.selected_emotion = emotion_index
+                except (ValueError, IndexError):
+                    CONFIGS.selected_emotion = None
+        else:
+            self.emotion_combo.set("")
+            CONFIGS.selected_emotion = None
+        
+        # 更新预览
+        self.update_preview()
+
     def on_character_changed(self, event=None):
         """角色改变事件"""
         selected_text = self.character_var.get()
@@ -286,15 +375,29 @@ class ManosabaGUI:
         char_idx = CONFIGS.character_list.index(char_id) + 1
         self.core.switch_character(char_idx)
 
-        # 更新表情选项
-        self.update_emotion_options()
+        # 更新情感筛选下拉框
+        self.update_sentiment_filter_combo()
+        
+        # 更新表情选项（先使用全部表情）
+        self.sentiment_filter_combo.set("全部表情")
+        
+        # 根据随机表情状态决定是否执行筛选
+        if not self.emotion_random_var.get():
+            self.on_sentiment_filter_changed()  # 这会自动更新表情下拉框
 
         # 重置表情选择为第一个表情
-        self.emotion_combo.set("表情 1")
-        if self.emotion_random_var.get():
-            CONFIGS.selected_emotion = None
+        if self.emotion_combo["values"]:
+            self.emotion_combo.set(self.emotion_combo["values"][0])
+            if self.emotion_random_var.get():
+                CONFIGS.selected_emotion = None
+            else:
+                try:
+                    CONFIGS.selected_emotion = int(self.emotion_combo.get().split()[-1])
+                except (ValueError, IndexError):
+                    CONFIGS.selected_emotion = None
         else:
-            CONFIGS.selected_emotion = 1
+            self.emotion_combo.set("")
+            CONFIGS.selected_emotion = None
 
         # 标记需要更新预览内容
         self.update_preview()
@@ -311,14 +414,25 @@ class ManosabaGUI:
     def on_emotion_random_changed(self):
         """表情随机选择改变"""
         if self.emotion_random_var.get():
+            # 启用随机表情时，禁用表情下拉框和情感筛选下拉框
             self.emotion_combo.config(state="disabled")
+            self.sentiment_filter_combo.config(state="disabled")
             CONFIGS.selected_emotion = None
         else:
+            # 禁用随机表情时，启用表情下拉框和情感筛选下拉框
             self.emotion_combo.config(state="readonly")
+            self.sentiment_filter_combo.config(state="readonly")
+            
+            # 更新表情选择
             emotion_value = self.emotion_combo.get()
             if emotion_value:
-                emotion_index = int(emotion_value.split()[-1])
-                CONFIGS.selected_emotion = emotion_index
+                try:
+                    emotion_index = int(emotion_value.split()[-1])
+                    CONFIGS.selected_emotion = emotion_index
+                except (ValueError, IndexError):
+                    CONFIGS.selected_emotion = None
+            else:
+                CONFIGS.selected_emotion = None
 
         self.update_preview()
 
@@ -333,9 +447,13 @@ class ManosabaGUI:
         if not self.emotion_random_var.get():
             emotion_value = self.emotion_var.get()
             if emotion_value:
-                emotion_index = int(emotion_value.split()[-1])
-                CONFIGS.selected_emotion = emotion_index
-                self.update_preview()
+                try:
+                    emotion_index = int(emotion_value.split()[-1])
+                    CONFIGS.selected_emotion = emotion_index
+                    self.update_preview()
+                except (ValueError, IndexError):
+                    CONFIGS.selected_emotion = None
+                    self.update_status("表情选择无效")
 
     def on_background_random_changed(self):
         """背景随机选择改变"""

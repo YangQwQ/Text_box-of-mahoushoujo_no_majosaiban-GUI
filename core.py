@@ -656,7 +656,7 @@ class ManosabaCore:
             if not self._active_process_allowed():
                 return "前台应用不在白名单内"
             if CONFIGS.config.AUTO_SEND_IMAGE:
-                time.sleep(0.1)
+                time.sleep(0.2)
                 self.kbd_controller.press(Key.enter)
                 self.kbd_controller.release(Key.enter)
 

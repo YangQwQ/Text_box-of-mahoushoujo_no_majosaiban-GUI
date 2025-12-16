@@ -43,7 +43,7 @@ class SentimentAnalyzer:
     def __init__(self):
         self.client_manager = AIClientManager()  # 使用客户端管理器
         self.is_initialized = False
-        self.emotion_list = ["平静", "喜悦", "喜爱", "惊讶", "困惑", "无语", "悲伤", "愤怒", "恐惧"]
+        self.emotion_list = CONFIGS.emotion_list
         
         self.selected_emotion = None #用来在generate_image里显示选择的表情
 
