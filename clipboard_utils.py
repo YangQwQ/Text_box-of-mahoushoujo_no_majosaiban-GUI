@@ -150,9 +150,6 @@ class ClipboardManager:
                 if html:
                     html_text, html_image = self.parse_html_clipboard(html)
 
-                    if not text:
-                        text = html_text
-
                     if html_image is not None:
                         image = html_image
         except Exception as e:

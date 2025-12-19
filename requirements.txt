@@ -6,3 +6,4 @@ psutil>=5.9.0
 openai
 emoji
 BeautifulSoup4
+requests

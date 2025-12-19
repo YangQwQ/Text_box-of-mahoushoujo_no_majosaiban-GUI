@@ -1,7 +1,7 @@
 ema:
   full_name: 樱羽艾玛
   emotion_count: 11
-  offset: [-50,200]
+  offset: [-100,200]
   scale: 0.65
   font: font3.ttf
   "平静": [3]
@@ -16,7 +16,7 @@ ema:
 hiro:
   full_name: 二阶堂希罗
   emotion_count: 16
-  offset: [-150,180]
+  offset: [-210,180]
   scale: 0.85
   font: font3.ttf
   "平静": [5,6]
@@ -131,10 +131,10 @@ meruru:
   "喜爱": [8,9,13,14]
   "惊讶": [15,16]
   "困惑": [15,16]
-  "无语": [1,8,9,13]
-  "悲伤": [3,4,5,10,11,12]
+  "无语": [1,9,10,13]
+  "悲伤": [3,4,6,5,11,12]
   "愤怒": [1,2]
-  "恐惧": [6,7]
+  "恐惧": [7,8]
 noa:
   full_name: 城崎诺亚
   emotion_count: 8
@@ -168,7 +168,7 @@ reia:
 miria:
   full_name: 佐伯米莉亚
   emotion_count: 8
-  offset: [-190,200]
+  offset: [-160,200]
   scale: 0.71
   font: font3.ttf
   "平静": [7]
@@ -183,7 +183,7 @@ miria:
 nanoka:
   full_name: 黑部奈叶香
   emotion_count: 8
-  offset: [-140,200]
+  offset: [-100,200]
   scale: 0.84
   font: font3.ttf
   "平静": [3,7]

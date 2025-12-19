@@ -264,7 +264,7 @@ class ManosabaGUI:
 
         # 创建一个单独的设置按钮，而不是下拉菜单
         menubar.add_command(label="设置", command=self.open_settings)
-        # menubar.add_command(label="布局", command=self.open_layout) #(编辑对话框的角色名字位置和字号及颜色之类的)
+        # menubar.add_command(label="样式", command=self.open_layout) #(编辑对话框的角色名字位置和字号及颜色之类的)
         menubar.add_command(label="关于", command=self.open_about)
 
     def open_about(self):
@@ -506,7 +506,6 @@ class ManosabaGUI:
                         CONFIGS.selected_emotion = None
                     else:
                         CONFIGS.selected_emotion = int(self.emotion_combo.get().split()[-1])
-                    self.preview_manager.update_preview()
         
         # 在UI线程中执行更新
         self.root.after(0, update_ui)
@@ -543,13 +542,7 @@ class ManosabaGUI:
             if not self.core.sentiment_analyzer_status['initialized']:
                 # 如果未初始化，则开始初始化
                 self.update_status("正在初始化情感分析器...")
-                self.core.toggle_sentiment_matching()
-            else:
-                # 如果已初始化，直接启用
-                self.core.toggle_sentiment_matching()
-        else:
-            # 如果当前已启用，则禁用
-            self.core.toggle_sentiment_matching()
+        self.core.toggle_sentiment_matching()
     
     def on_sentiment_matching_changed(self):
         """情感匹配设置改变"""
