@@ -33,12 +33,15 @@
       <img src="https://github.com/user-attachments/assets/38d0e142-8707-4f43-b1a8-1bb0bcdbe848" alt="JS版界面截图">
    </details>
    
-   - 无需Python环境，使用浏览器实现的版本。适合偶尔生成图片的用户。
+   - 无需`Python`环境，使用浏览器实现的版本。适合偶尔生成图片的用户。
+  
+4. **[Rust 内核🦀](https://github.com/oplivilqo/manosaba_text_box/tree/rust)**: `rust`分支
+   - 使用`Rust`重写了内核逻辑来提升性能。
    
-4. **[LEGACY 古早版本](https://github.com/oplivilqo/manosaba_text_box/tree/legacy)**: `legacy`分支
+5. **[LEGACY 古早版本](https://github.com/oplivilqo/manosaba_text_box/tree/legacy)**: `legacy`分支
    - 纯命令行界面，监听全局快捷键的古早版本，「但是没bug」。
 
-5. **其他 tkinter GUI** (现在还没合并但未来可期)
+6. **其他 tkinter GUI** (现在还没合并但未来可期)
    - 其他使用tkinter实现的GUI用户界面
    - 目前还有两位老师正在爆肝：
       1. @morpheus315 _[PR #32](https://github.com/oplivilqo/manosaba_text_box/pull/32)_: [仓库地址](https://github.com/morpheus315/Text_box-of-mahoushoujo_no_majosaiban-NEO) (已发布Release)
@@ -90,5 +93,6 @@
 <div align="right">
   
 ### _以上. 柊回文_
+
 
 
