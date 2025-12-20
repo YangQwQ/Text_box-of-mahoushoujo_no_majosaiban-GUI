@@ -115,7 +115,7 @@ class HotkeyManager:
             self._listener = keyboard.GlobalHotKeys(self._hotkey_handlers)
             self._listener.daemon = True
             self._listener.start()
-            print(f"已注册热键: {list(self._hotkey_handlers.keys())}")
+            # print(f"已注册热键: {list(self._hotkey_handlers.keys())}")
         except Exception as e:
             print(f"启动热键监听器失败: {e}")
             self._listener = None

@@ -88,102 +88,322 @@ class ManosabaCore:
         """获取预加载状态"""
         return self.preload_manager.get_preload_status()
 
+    def _calculate_canvas_size(self):
+        """根据样式配置计算画布大小"""
+        ratio = CONFIGS.style.aspect_ratio
+        
+        # 固定宽度为2560，根据比例计算高度
+        if ratio == "5:4":
+            # 5:4 = 2560 : x, x = 2560 * 4 / 5 = 2048
+            height = int(2560 * 4 / 5)
+        elif ratio == "16:9":
+            # 16:9 = 2560 : x, x = 2560 * 9 / 16 = 1440
+            height = int(2560 * 9 / 16)
+        else:  # "3:1" 或默认
+            # 3:1 = 2560 : x, x = 2560 * 1 / 3 ≈ 853.33
+            height = int(2560 / 3)
+        
+        return 2560, height
+    
     def _generate_base_image_with_text(
         self, character_name: str, background_index: int, emotion_index: int
     ) -> Image.Image:
-        """生成带角色文字的基础图片"""
-        # 1. 创建一个2560x854的空白图片（透明背景）
-        canvas = Image.new("RGBA", (2560, 854), (0, 0, 0, 0))
+        """生成带角色文字的基础图片（使用样式配置）"""
+        # 1. 根据样式配置创建画布
+        canvas_width, canvas_height = self._calculate_canvas_size()
+        canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
         
-        # 2. 加载背景图（使用简化函数）
-        background = load_background_safe(f"c{background_index}", default_size=(2560, 854), default_color=(100, 100, 200))
+        # 2. 加载背景图
+        background = load_background_safe(f"c{background_index}", default_size=(canvas_width, canvas_height), default_color=(100, 100, 200))
         
-        # 计算背景图粘贴位置（底部对齐、水平居中）
-        bg_x = (canvas.width - background.width) // 2  # 水平居中
-        bg_y = canvas.height - background.height  # 底部对齐
+        # 计算背景图缩放比例，使其高度等于画布高度
+        bg_width, bg_height = background.size
+        scale = canvas_height / bg_height
+        new_width = int(bg_width * scale)
+        new_height = canvas_height
+        
+        # 如果缩放后的宽度小于画布宽度，需要重新计算以宽度为基准
+        if new_width < canvas_width:
+            scale = canvas_width / bg_width
+            new_width = canvas_width
+            new_height = int(bg_height * scale)
+        
+        # 缩放背景图
+        background = background.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # 计算背景图粘贴位置（底部居中）
+        bg_x = (canvas.width - background.width) // 2
+        bg_y = canvas.height - background.height
         
         # 将背景图粘贴到画布上
         canvas.paste(background, (bg_x, bg_y), background)
         
-        # 3. 加载textbox1.png（黑色渐变效果）
-        textbox_path = get_resource_path(os.path.join("assets", "shader", "textbox.png"))
-        if os.path.exists(textbox_path):
-            textbox = load_image_cached(textbox_path)
-            # 确保textbox宽度为2560（如果原始尺寸不同，则进行等比缩放）
-            if textbox.width != 2560:
-                # 计算缩放比例和新高度
-                width_ratio = 2560 / textbox.width
-                new_height = int(textbox.height * width_ratio)
-                textbox = textbox.resize((2560, new_height), Image.Resampling.LANCZOS)
-            
-            # 左下角对齐位置
-            textbox_y = canvas.height - textbox.height
-            
-            # 确保textbox是RGBA模式
-            if textbox.mode != 'RGBA':
-                textbox = textbox.convert('RGBA')
-            # 创建一个新的合成图层
-            textbox_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-            textbox_layer.paste(textbox, (0, textbox_y), textbox)
-
-            # 使用alpha_composite进行正确的alpha混合
-            canvas = Image.alpha_composite(canvas, textbox_layer)
+        # 3. 获取排序后的组件列表
+        sorted_components = CONFIGS.get_sorted_image_components()
         
-        # 4. 加载角色图片（使用简化函数）
+        # 4. 按图层顺序绘制所有组件
+        for component in sorted_components:
+            if not component.get("enabled", True):
+                continue
+                
+            component_type = component.get("type")
+            
+            if component_type == "character":
+                # 绘制角色
+                self._draw_character_component(canvas, component, character_name, emotion_index)
+            elif component_type == "textbox":
+                # 绘制文本框遮罩
+                canvas = self._draw_textbox_component(canvas, component)
+            elif component_type == "namebox":
+                # 绘制名称框
+                self._draw_namebox_component(canvas, component, character_name)
+            elif component_type == "extra":
+                # 绘制额外组件
+                canvas = self._draw_extra_component(canvas, component)
+        
+        return canvas
+
+    def _draw_character_component(self, canvas, component, character_name, emotion_index):
+        """绘制角色组件"""
+        # 检查是否启用
+        if not component.get("enabled", True):
+            return
+            
+        # 加载角色图片
         overlay = load_character_safe(character_name, emotion_index, default_size=(800, 600), default_color=(0, 0, 0, 0))
         
-        # 计算角色图片粘贴位置（左下角对齐，相对于整个画布）
-        chara_x = 0  # 左下角对齐，x坐标为0
-        chara_y = canvas.height - overlay.height  # 左下角对齐，y坐标为画布高度-角色图片高度
+        # 应用缩放
+        scale = component.get("scale", 1.0)
+        if scale != 1.0:
+            original_width, original_height = overlay.size
+            new_width = int(original_width * scale)
+            new_height = int(original_height * scale)
+            overlay = overlay.resize((new_width, new_height), Image.Resampling.LANCZOS)
         
-        # 将角色图片粘贴到画布上
-        canvas.paste(overlay, (chara_x, chara_y), overlay)
+        # 计算粘贴位置（左下角对齐）
+        paste_x = 0 + component.get("offset_x", 0) + CONFIGS.current_character.get("offset", (0, 0))[0] + CONFIGS.current_character.get(f"offsetX", {}).get(f"{emotion_index}", 0)
+        paste_y = canvas.height - overlay.height + component.get("offset_y", 0) + CONFIGS.current_character.get("offset", (0, 0))[1] + CONFIGS.current_character.get(f"offsetY", {}).get(f"{emotion_index}", 0)
         
-        # 5. 加载namebase.png
-        namebase_path = get_resource_path(os.path.join("assets", "shader", "namebase.png"))
-        if os.path.exists(namebase_path):
-            namebase = load_image_cached(namebase_path)
-            new_height = int(namebase.height * 1.3)
-            new_width = int(namebase.width * 1.3)
-            namebase = namebase.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        canvas.paste(overlay, (paste_x, paste_y), overlay)
+
+    def _draw_textbox_component(self, canvas, component):
+        """绘制文本框组件"""
+        overlay_file = component.get("overlay", "")
+        if not overlay_file:
+            return
             
-            # 左下角对齐粘贴
-            namebase_y = canvas.height - namebase.height-400
-            canvas.paste(namebase, (500, namebase_y), namebase)
+        overlay_path = get_resource_path(os.path.join("assets", "shader", overlay_file))
+        if not os.path.exists(overlay_path):
+            return
+            
+        textbox = load_image_cached(overlay_path)
         
-        # 6. 添加角色名称文字
-        if CONFIGS.text_configs_dict and character_name in CONFIGS.text_configs_dict:
-            draw = ImageDraw.Draw(canvas)
-            shadow_offset = (2, 2)
-            shadow_color = (0, 0, 0)
-
-            for config in CONFIGS.text_configs_dict[character_name]:
-                text = config["text"]
-                position = tuple(config["position"])
-                font_color = tuple(config["font_color"])
-                font_size = config["font_size"]
-
-                # 获取字体
-                font_name = CONFIGS.current_character.get("font", "font3.ttf")
-                font = load_font_cached(font_name, font_size)
-                
-                # 计算新的位置
-                text_x = int(position[0])
-                # 假设文字在画布底部上方100px的位置
-                text_y = canvas.height - 850 + int(position[1])
-                
-                # 绘制阴影文字
-                shadow_position = (
-                    text_x + shadow_offset[0],
-                    text_y + shadow_offset[1],
-                    text_x + shadow_offset[0],
-                    text_y + shadow_offset[1],
-                )
-                draw.text(shadow_position, text, fill=shadow_color, font=font)
-
-                # 绘制主文字
-                draw.text((text_x, text_y), text, fill=font_color, font=font)
+        # 应用缩放
+        scale = component.get("scale", 1.0)
+        if scale != 1.0:
+            original_width, original_height = textbox.size
+            new_width = int(original_width * scale)
+            new_height = int(original_height * scale)
+            textbox = textbox.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # 计算粘贴位置
+        align = component.get("align", "bottom-center")
+        canvas_width, canvas_height = canvas.size
+        
+        if align == "bottom-center":
+            # 底部居中
+            paste_x = (canvas_width - textbox.width) // 2 + component.get("offset_x", 0)
+            paste_y = canvas_height - textbox.height + component.get("offset_y", 0)
+        elif align == "bottom-left":
+            paste_x = 0 + component.get("offset_x", 0)
+            paste_y = canvas_height - textbox.height + component.get("offset_y", 0)
+        elif align == "bottom-right":
+            paste_x = canvas_width - textbox.width + component.get("offset_x", 0)
+            paste_y = canvas_height - textbox.height + component.get("offset_y", 0)
+        else:
+            paste_x = 0 + component.get("offset_x", 0)
+            paste_y = canvas_height - textbox.height + component.get("offset_y", 0)
+        
+        # 创建透明图层进行alpha混合
+        overlay_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        overlay_layer.paste(textbox, (paste_x, paste_y), textbox)
+        
+        # 使用alpha_composite进行正确的alpha混合
+        canvas = Image.alpha_composite(canvas, overlay_layer)
+        
+        # 返回修改后的画布
         return canvas
+
+    def _draw_namebox_component(self, canvas, component, character_name):
+        """绘制名称框组件"""
+        overlay_file = component.get("overlay", "")
+        if not overlay_file:
+            return
+            
+        # 创建带文字的namebox
+        namebox_with_text = self._create_namebox_with_text(character_name, component)
+        
+        if namebox_with_text:
+            # 应用缩放
+            scale = component.get("scale", 1.3)
+            if scale != 1.0:
+                original_width, original_height = namebox_with_text.size
+                new_width = int(original_width * scale)
+                new_height = int(original_height * scale)
+                namebox_with_text = namebox_with_text.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # 计算粘贴位置（左下角对齐 + 偏移）
+            align = component.get("align", "bottom-left")
+            if align == "bottom-left":
+                namebox_x = 0 + component.get("offset_x", 0)
+                namebox_y = canvas.height - namebox_with_text.height + component.get("offset_y", 0)
+            elif align == "top-left":
+                namebox_x = 0 + component.get("offset_x", 0)
+                namebox_y = 0 + component.get("offset_y", 0)
+            elif align == "top-right":
+                namebox_x = canvas.width - namebox_with_text.width + component.get("offset_x", 0)
+                namebox_y = 0 + component.get("offset_y", 0)
+            elif align == "bottom-right":
+                namebox_x = canvas.width - namebox_with_text.width + component.get("offset_x", 0)
+                namebox_y = canvas.height - namebox_with_text.height + component.get("offset_y", 0)
+            
+            canvas.paste(namebox_with_text, (namebox_x, namebox_y), namebox_with_text)
+
+    def _draw_extra_component(self, canvas, component):
+        """绘制额外组件"""
+        overlay_file = component.get("overlay", "")
+        if not overlay_file:
+            return canvas  # 返回原画布
+            
+        overlay_path = get_resource_path(os.path.join("assets", "shader", overlay_file))
+        if not os.path.exists(overlay_path):
+            return canvas  # 返回原画布
+            
+        extra_img = load_image_cached(overlay_path)
+        
+        # 应用缩放
+        scale = component.get("scale", 1.0)
+        if scale != 1.0:
+            original_width, original_height = extra_img.size
+            new_width = int(original_width * scale)
+            new_height = int(original_height * scale)
+            extra_img = extra_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # 根据对齐方式计算粘贴位置
+        align = component.get("align", "top-left")
+        canvas_width, canvas_height = canvas.size
+        
+        if align == "top-left":
+            paste_x = 0 + component.get("offset_x", 0)
+            paste_y = 0 + component.get("offset_y", 0)
+        elif align == "top-right":
+            paste_x = canvas_width - extra_img.width + component.get("offset_x", 0)
+            paste_y = 0 + component.get("offset_y", 0)
+        elif align == "bottom-left":
+            paste_x = 0 + component.get("offset_x", 0)
+            paste_y = canvas_height - extra_img.height + component.get("offset_y", 0)
+        elif align == "bottom-right":
+            paste_x = canvas_width - extra_img.width + component.get("offset_x", 0)
+            paste_y = canvas_height - extra_img.height + component.get("offset_y", 0)
+        elif align == "bottom-center":
+            paste_x = (canvas_width - extra_img.width) // 2 + component.get("offset_x", 0)
+            paste_y = canvas_height - extra_img.height + component.get("offset_y", 0)
+        else:  # 默认左上角
+            paste_x = 0 + component.get("offset_x", 0)
+            paste_y = 0 + component.get("offset_y", 0)
+        
+        # 创建透明图层进行alpha混合
+        overlay_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        overlay_layer.paste(extra_img, (paste_x, paste_y), extra_img)
+        
+        # 使用alpha_composite进行正确的alpha混合
+        canvas = Image.alpha_composite(canvas, overlay_layer)
+        
+        return canvas
+
+    def _create_namebox_with_text(self, character_name: str, component: dict) -> Image.Image:
+        """在namebase上合成角色名字文字，使用组件配置"""
+        overlay_file = component.get("overlay", "")
+        if not overlay_file:
+            return None
+            
+        namebox_path = get_resource_path(os.path.join("assets", "shader", overlay_file))
+        if not os.path.exists(namebox_path):
+            return None
+                
+        namebox = load_image_cached(namebox_path)
+        
+        # 如果角色没有文字配置，直接返回namebox
+        if character_name not in CONFIGS.text_configs_dict:
+            return namebox
+        
+        # 创建绘制对象
+        draw = ImageDraw.Draw(namebox)
+        
+        # 获取角色的文字配置
+        text_configs = CONFIGS.text_configs_dict[character_name]
+        
+        # 计算基线位置（基于最大字号的文字）
+        max_font_size = max((config.get("font_size", 92) for config in text_configs if config.get("text")), default=92)
+        
+        # 根据最大字号计算基线位置
+        # baseline_y_large = int(namebox.height * 0.615)
+        # baseline_y_small = baseline_y_large + 5
+        baseline_y = int(namebox.height * 0.65)
+
+        # 按配置中的顺序绘制每个文字
+        current_x = int(270 - max_font_size / 2)
+        
+        for config in text_configs:
+            text = config["text"]
+            if not text:  # 跳过空文本
+                continue
+                
+            font_color = tuple(config["font_color"])
+            font_size = config["font_size"]
+            
+            # 获取字体
+            font_name = CONFIGS.current_character.get("font", "font3.ttf")
+            font = load_font_cached(font_name, font_size)
+            
+            # 计算文字宽度（使用textlength方法）
+            text_width = int(draw.textlength(text, font=font))
+            
+            # 根据字号选择基线位置
+            # if font_size >= 100:  # 大字
+            #     baseline_y = baseline_y_large
+            # else:  # 小字
+            #     baseline_y = baseline_y_small
+            
+            # 计算阴影位置和主文字位置
+            shadow_x = current_x + 2
+            shadow_y = baseline_y + 2
+            
+            main_x = current_x
+            main_y = baseline_y
+            
+            # 绘制阴影文字
+            draw.text(
+                (shadow_x, shadow_y), 
+                text, 
+                fill=(0, 0, 0), 
+                font=font,
+                anchor="ls"
+            )
+
+            # 绘制主文字
+            draw.text(
+                (main_x, main_y), 
+                text, 
+                fill=font_color, 
+                font=font,
+                anchor="ls"
+            )
+            
+            # 更新下一个文字的起始位置
+            current_x = main_x + text_width
+        
+        return namebox
 
     def set_gui_callback(self, callback):
         """设置GUI回调函数，用于通知状态变化"""
@@ -590,38 +810,21 @@ class ManosabaCore:
             return "错误: 没有文本或图像"
 
         try:
-            # 使用GUI中设置的对话框字体，而不是角色专用字体
-            font_family = CONFIGS.gui_settings.get("font_family")
-
-            # 查找匹配的字体文件
-            font_name = next(
-                (font_file for font_file in get_available_fonts()
-                if font_file and font_family == os.path.splitext(os.path.basename(font_file))[0]),
-                None
-            )
-
-            if not font_name:
-                print(f"字体家族 {font_family} 不在可用字体列表中")
-                font_name = CONFIGS.mahoshojo[CONFIGS.get_character()].get("font", "font3.ttf")
+            # 重新计算左上右下
+            bottom_right=(CONFIGS.config.BOX_RECT[1][0],self._current_base_image.height-40)
+            top_left=(CONFIGS.config.BOX_RECT[0][0],bottom_right[1]-CONFIGS.config.BOX_HEIGHT)
 
             # 生成图片
             print(f"[{int((time.time()-start_time)*1000)}] 开始合成图片")
             bmp_bytes = draw_content_auto(
                 image_source=self._current_base_image,
-                top_left=CONFIGS.config.BOX_RECT[0],
-                bottom_right=CONFIGS.config.BOX_RECT[1],
+                top_left=top_left,
+                bottom_right=bottom_right,
                 text=text,
                 content_image=image,
-                text_align="left",
-                text_valign="top",
                 image_align="center",
                 image_valign="middle",
-                color=self._hex_to_rgb(CONFIGS.gui_settings.get("text_color", "#FFFFFF")),
-                bracket_color=self._hex_to_rgb(CONFIGS.gui_settings.get("bracket_color", "##EF4F54")),
-                max_font_height=CONFIGS.gui_settings.get("font_size", 120),
-                font_name=font_name,
                 image_padding=12,
-                compression_settings=CONFIGS.gui_settings.get("image_compression", None),
             )
 
             print(f"[{int((time.time()-start_time)*1000)}] 图片合成完成")

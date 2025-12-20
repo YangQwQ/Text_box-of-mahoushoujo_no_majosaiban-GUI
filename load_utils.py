@@ -325,7 +325,7 @@ def load_character_safe(character_name: str, emotion_index: int, default_size: t
                 
                 # 应用缩放
                 scale = CONFIGS.current_character.get("scale", 1.0)
-                offset = CONFIGS.current_character.get("offset", (0, 0))
+                # offset = CONFIGS.current_character.get("offset", (0, 0))
                 
                 if scale != 1.0:
                     original_width, original_height = img.size
@@ -333,22 +333,23 @@ def load_character_safe(character_name: str, emotion_index: int, default_size: t
                     new_height = int(original_height * scale)
                     img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
                 
+                result =img
                 # 图片尺寸
-                img_width, img_height = img.size
+                # img_width, img_height = img.size
                 
-                # 创建800x800的透明背景图片
-                result = Image.new("RGBA", (1000, 1000), (0, 0, 0, 0))
+                # # 创建800x800的透明背景图片
+                # result = Image.new("RGBA", (1000, 1000), (0, 0, 0, 0))
                 
-                # 应用额外偏移（如果有）
-                offsetX = CONFIGS.current_character.get(f"offsetX", {}).get(f"{emotion_index}", 0)
-                offsetY = CONFIGS.current_character.get(f"offsetY", {}).get(f"{emotion_index}", 0)
+                # # 应用额外偏移（如果有）
+                # offsetX = CONFIGS.current_character.get(f"offsetX", {}).get(f"{emotion_index}", 0)
+                # offsetY = CONFIGS.current_character.get(f"offsetY", {}).get(f"{emotion_index}", 0)
                 
-                # 计算粘贴位置（水平居中对齐 + 偏移）
-                paste_x = offset[0] + 500 - img_width//2 + offsetX
-                paste_y = offset[1] + offsetY
+                # # 计算粘贴位置（水平居中对齐 + 偏移）
+                # paste_x = offset[0] + 500 - img_width//2 + offsetX
+                # paste_y = offset[1] + offsetY
                 
-                # 将缩放后的图片粘贴到透明背景上
-                result.paste(img, (paste_x, paste_y), img)
+                # # 将缩放后的图片粘贴到透明背景上
+                # result.paste(img, (paste_x, paste_y), img)
                     
                 _character_cache[cache_key] = result
             else:

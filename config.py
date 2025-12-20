@@ -5,6 +5,84 @@ import yaml
 from sys import platform
 from path_utils import get_base_path, get_resource_path, ensure_path_exists
 
+class StyleConfig:
+    """样式配置类"""
+    
+    def __init__(self):
+        # 图片比例设置
+        self.aspect_ratio = "3:1"  # 可选: "3:1", "5:4", "16:9"
+        
+        # 字体设置（从常规设置移动过来）
+        self.font_family = "font3"
+        self.font_size = 90
+        self.text_color = '#FFFFFF'
+        self.bracket_color = '#EF4F54'
+        self.use_character_color = False  # 是否使用角色颜色作为强调色
+        
+        # 文本框文字偏移和对齐
+        self.text_offset_x = 0
+        self.text_offset_y = 0
+        self.text_align = "left"  # left, center, right
+        self.text_valign = "top"  # top, middle, bottom
+        
+        # 图片组件配置 - 统一格式，支持图层顺序
+        # 每个组件包含以下字段：
+        # - type: 组件类型 (character, textbox, namebox, extra)
+        # - enabled: 是否启用
+        # - overlay: 图片文件名（对于角色为空）
+        # - align: 对齐位置 (top-left, top-right, bottom-left, bottom-right, custom)
+        # - offset_x: X偏移
+        # - offset_y: Y偏移
+        # - scale: 缩放比例
+        # - layer: 图层顺序（数字，越小越底层）
+        
+        # 定义默认的图片组件
+        self.image_components = [
+            {
+                "type": "character",
+                "enabled": True,
+                "overlay": "",
+                "align": "bottom-left",  # 角色固定左下角对齐
+                "offset_x": 0,
+                "offset_y": 0,
+                "scale": 1.6,
+                "layer": 2  # 默认在中间层
+            },
+            {
+                "type": "textbox",
+                "enabled": True,
+                "overlay": "文本框1.webp",
+                "align": "bottom-center",  # 文本框固定底部居中
+                "offset_x": 0,
+                "offset_y": 0,
+                "scale": 1.0,
+                "layer": 1  # 默认在角色下层
+            },
+            {
+                "type": "namebox",
+                "enabled": True,
+                "overlay": "名字框.webp",
+                "align": "bottom-left",  # 名称框固定左下角对齐
+                "offset_x": 450,
+                "offset_y": -400,
+                "scale": 1.2,
+                "layer": 3  # 默认在最下层
+            }
+        ]
+    
+    def get_bracket_color(self, character_name=None):
+        """获取强调色，根据是否使用角色颜色返回不同的颜色"""
+        if self.use_character_color and character_name:
+            # 使用角色颜色
+            from config import CONFIGS
+            if character_name in CONFIGS.text_configs_dict and CONFIGS.text_configs_dict[character_name]:
+                first_config = CONFIGS.text_configs_dict[character_name][0]
+                font_color = first_config.get("font_color", (239, 79, 84))
+                return f"#{font_color[0]:02x}{font_color[1]:02x}{font_color[2]:02x}"
+        
+        # 返回配置的强调色
+        return self.bracket_color
+
 class ConfigLoader:
     """配置加载器"""
     
@@ -33,6 +111,11 @@ class ConfigLoader:
         # 状态变量(为None时为随机选择,否则为手动选择)
         self.selected_emotion = None
         self.selected_background = None
+        
+        # 样式配置
+        self.style_configs = {}
+        self.current_style = "default"
+        self.style = StyleConfig()
 
         # 加载版本信息
         self.version_info = self.load_version_info()
@@ -49,7 +132,123 @@ class ConfigLoader:
         self._load_configs()
 
         self.background_count = self._get_background_count()  # 背景图片数量
+        
+        # 加载样式配置
+        self._load_style_configs()
+
+    def apply_style(self, style_name: str):
+        """应用指定的样式配置"""
+        if style_name in self.style_configs:
+            style_data = self.style_configs[style_name]
+            self.current_style = style_name
+            
+            # 更新样式对象
+            for key, value in style_data.items():
+                if hasattr(self.style, key):
+                    setattr(self.style, key, value)
+                    
+            # 如果使用角色颜色作为强调色，更新强调色
+            if self.style.use_character_color:
+                self._update_bracket_color_from_character()
+            
+            # 保存上次选择的样式到GUI设置
+            self.gui_settings["last_style"] = style_name
+            self.save_gui_settings()
+
+    def update_style(self, style_name: str, style_data: Dict[str, Any]):
+        """更新样式配置"""
+        if style_name in self.style_configs:
+            # 确保有image_components字段
+            if "image_components" not in style_data:
+                style_data["image_components"] = self.style_configs[style_name].get("image_components", [])
+            
+            self.style_configs[style_name] = style_data
+            
+            # 如果更新的是当前样式，立即应用
+            if self.current_style == style_name:
+                self.apply_style(style_name)
+                
+            return self.save_style_configs()
+        return False
     
+    def _load_style_configs(self):
+        """加载样式配置"""
+        # 加载styles.yml文件
+        styles_data = self._load_yaml_file("styles.yml") or {}
+        
+        if not styles_data:
+            # 如果没有样式配置，创建默认配置
+            styles_data = {
+                "default": {
+                    "aspect_ratio": "3:1",
+                    "font_family": "font3",
+                    "font_size": 90,
+                    "text_color": "#FFFFFF",
+                    "bracket_color": "#EF4F54",
+                    "use_character_color": False,
+                    "text_offset_x": 0,
+                    "text_offset_y": 0,
+                    "text_align": "left",
+                    "text_valign": "top",
+                    "image_components": self.style.image_components
+                }
+            }
+            self._save_yaml_file("styles.yml", styles_data)
+        
+        self.style_configs = styles_data
+        self.current_style = self.gui_settings.get("last_style","default")
+        
+        # 应用当前样式
+        self.apply_style(self.current_style)
+    
+    def _update_bracket_color_from_character(self):
+        """根据当前角色的文本颜色更新强调色"""
+        character_name = self.get_character()
+        if character_name in self.text_configs_dict and self.text_configs_dict[character_name]:
+            # 获取第一个文本配置的颜色
+            first_config = self.text_configs_dict[character_name][0]
+            font_color = first_config.get("font_color", (255, 255, 255))
+            # 将RGB转换为十六进制
+            self.style.bracket_color = f"#{font_color[0]:02x}{font_color[1]:02x}{font_color[2]:02x}"
+    
+    def save_style_configs(self):
+        """保存样式配置到文件"""
+        return self._save_yaml_file("styles.yml", self.style_configs)
+    
+    def create_style(self, style_name: str, based_on: str = "default"):
+        """创建新样式"""
+        if style_name in self.style_configs:
+            return False  # 样式已存在
+        
+        if based_on in self.style_configs:
+            # 基于现有样式创建
+            new_style = self.style_configs[based_on].copy()
+        else:
+            # 创建默认样式
+            new_style = {}
+            # 复制默认样式的所有属性
+            default_style = StyleConfig()
+            for key in default_style.__dict__:
+                new_style[key] = getattr(default_style, key)
+        
+        self.style_configs[style_name] = new_style
+        return self.save_style_configs()
+    
+    def delete_style(self, style_name: str):
+        """删除样式"""
+        if style_name == "default":
+            return False  # 不能删除默认样式
+        
+        if style_name in self.style_configs:
+            del self.style_configs[style_name]
+            
+            # 如果删除的是当前样式，切换到默认样式
+            if self.current_style == style_name:
+                self.apply_style("default")
+                
+            return self.save_style_configs()
+        return False
+
     def _get_background_count(self) -> int:
         """动态获取背景图片数量"""
         try:
@@ -112,6 +311,15 @@ class ConfigLoader:
         # 加载配置文件
         config = self._load_yaml_file(f"{config_type}.yml")
         
+        if config_type == "text_configs":
+            # 对于text_configs，我们需要转换格式
+            # 从旧格式（带position）转换为新格式（不带position）
+            if config:
+                # 如果配置是旧格式（带position），转换为新格式
+                config = self._convert_text_configs_format(config)
+            else:
+                config = {}
+        
         if config_type in ["keymap", "process_whitelist"]:
             # 处理平台特定配置
             if config:
@@ -131,6 +339,25 @@ class ConfigLoader:
         
         return config
     
+    def _convert_text_configs_format(self, old_config: Dict[str, Any]) -> Dict[str, Any]:
+        """转换text_configs格式，移除position参数"""
+        new_config = {}
+        
+        for character_name, text_list in old_config.items():
+            new_text_list = []
+            for text_item in text_list:
+                # 只保留text, font_color, font_size，移除position
+                new_text_item = {
+                    "text": text_item.get("text", ""),
+                    "font_color": text_item.get("font_color", [255, 255, 255]),
+                    "font_size": text_item.get("font_size", 92)
+                }
+                new_text_list.append(new_text_item)
+            
+            new_config[character_name] = new_text_list
+        
+        return new_config
+    
     def _merge_dicts(self, default: Dict, override: Dict) -> Dict:
         """递归合并两个字典"""
         result = default.copy()
@@ -143,14 +370,10 @@ class ConfigLoader:
     
     def _get_default_setting(self, config_type: str) -> Dict[str, Any]:
         """获取默认设置"""
-        print(f"获取默认配置：{config_type}")
+        # print(f"获取默认配置：{config_type}")
 
         if config_type == "settings":
             return {
-                "font_family": "font3",
-                "font_size": 90,
-                "text_color": '#FFFFFF',
-                "bracket_color": '#EF4F54',
                 "image_compression": {
                     "pixel_reduction_enabled": True,
                     "pixel_reduction_ratio": 40
@@ -357,12 +580,57 @@ class ConfigLoader:
                 "github": "https://github.com/YangQwQ/ManosabaTextbox-GUI"
             }
 
+    def get_sorted_image_components(self):
+        """获取排序后的图片组件列表（按图层顺序）"""
+        return sorted(self.style.image_components, key=lambda x: x.get("layer", 0))
+
+    def get_component_by_type(self, component_type):
+        """根据类型获取组件配置"""
+        for component in self.style.image_components:
+            if component.get("type") == component_type:
+                return component
+        return None
+
+    def update_component(self, component_type, updates):
+        """更新指定类型的组件配置"""
+        for i, component in enumerate(self.style.image_components):
+            if component.get("type") == component_type:
+                self.style.image_components[i].update(updates)
+                return True
+        return False
+
+    def add_extra_component(self, component_config):
+        """添加额外组件"""
+        # 确保有唯一ID
+        if "id" not in component_config:
+            component_config["id"] = f"extra_{len([c for c in self.style.image_components if c.get('type') == 'extra'])}"
+        
+        # 设置默认类型为extra
+        if "type" not in component_config:
+            component_config["type"] = "extra"
+        
+        self.style.image_components.append(component_config)
+        return True
+
+    def remove_extra_component(self, component_id):
+        """删除额外组件"""
+        self.style.image_components = [
+            c for c in self.style.image_components 
+            if not (c.get("type") == "extra" and c.get("id") == component_id)
+        ]
+        return True
+
+    def get_extra_components(self):
+        """获取所有额外组件"""
+        return [c for c in self.style.image_components if c.get("type") == "extra"]
+
 class AppConfig:
     """应用配置类"""
     
     def __init__(self, base_path=None):
         # self.BOX_RECT = ((728, 355), (2339, 800))  # 文本框区域坐标
         self.BOX_RECT = ((760, 355), (2339, 800))
+        self.BOX_HEIGHT=self.BOX_RECT[1][1]-self.BOX_RECT[0][1]
         self.KEY_DELAY = 0.05  # 按键延迟
         self.AUTO_PASTE_IMAGE = True
         self.AUTO_SEND_IMAGE = True

@@ -2,16 +2,17 @@
 # 版本信息配置
 
 # 当前版本号
-version: "1.5.8"
+version: "1.6.0"
 
 # 版本历史 记录的是exe的更新，并非代码的更新记录
 history:
-  - version: "1.5.8"
-    date: "2025-12-19"
+  - version: "1.6.0"
+    date: "2025-12-20"
     description:
       - "添加了关于窗口，并提供了检查更新功能"
       - "添加了表情筛选功能"
       - "使用了 Existence 修复的角色立绘"
+      - "添加了样式编辑功能"
       - "修复了一些已知bug（"
   - version: "1.5.5"
     date: "2025-12-14"
@@ -48,6 +49,7 @@ program:
     - "morpheus315"
     - "BaiJin0224"
     - "CCYellowStar2"
+    - "Existence"
   description: "魔裁文本框生成工具"
   github: "https://github.com/YangQwQ/ManosabaTextbox-GUI"
   origin_project: "https://github.com/oplivilqo/manosaba_text_box"

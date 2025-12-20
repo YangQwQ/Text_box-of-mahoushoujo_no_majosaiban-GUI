@@ -1,0 +1,99 @@
+'16:9':
+  aspect_ratio: '16:9'
+  bracket_color: '#ef4f54'
+  font_family: font3
+  font_size: 50
+  image_components:
+  - align: bottom-left
+    enabled: true
+    layer: 0
+    offset_x: 900
+    offset_y: -900
+    overlay: ''
+    scale: 1.4
+    type: character
+  - align: bottom-center
+    enabled: true
+    layer: 1
+    offset_x: 0
+    offset_y: 0
+    overlay: 文本框1.webp
+    scale: 1.0
+    type: textbox
+  - align: bottom-left
+    enabled: true
+    layer: 2
+    offset_x: 200
+    offset_y: -300
+    overlay: 名字框.webp
+    scale: 1.0
+    type: namebox
+  - align: top-left
+    enabled: true
+    id: extra_2
+    layer: 3
+    offset_x: 0
+    offset_y: 0
+    overlay: 书-左上.webp
+    scale: 1.0
+    type: extra
+  - align: top-right
+    enabled: true
+    id: extra_3
+    layer: 4
+    offset_x: 0
+    offset_y: 0
+    overlay: 枝叶-右上.webp
+    scale: 1.0
+    type: extra
+  - align: top-right
+    enabled: true
+    id: extra_1
+    layer: 5
+    offset_x: 0
+    offset_y: 0
+    overlay: 齿轮-右上.webp
+    scale: 1.0
+    type: extra
+  text_align: left
+  text_color: '#FFFFFF'
+  text_offset_x: -180
+  text_offset_y: 140
+  text_valign: top
+  use_character_color: false
+default:
+  aspect_ratio: '3:1'
+  bracket_color: '#ef4f54'
+  font_family: font3
+  font_size: 90
+  image_components:
+  - align: bottom-center
+    enabled: true
+    layer: 0
+    offset_x: 0
+    offset_y: 0
+    overlay: 文本框1.webp
+    scale: 1.0
+    type: textbox
+  - align: bottom-left
+    enabled: true
+    layer: 3
+    offset_x: 0
+    offset_y: 0
+    overlay: ''
+    scale: 1.6
+    type: character
+  - align: bottom-left
+    enabled: true
+    layer: 4
+    offset_x: 450
+    offset_y: -400
+    overlay: 名字框.webp
+    scale: 1.2
+    type: namebox
+  text_align: left
+  text_color: '#FFFFFF'
+  text_offset_x: 0
+  text_offset_y: 0
+  text_valign: top
+  use_character_color: false

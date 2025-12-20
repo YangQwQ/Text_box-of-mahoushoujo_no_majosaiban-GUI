@@ -8,6 +8,7 @@ import emoji
 
 from load_utils import load_font_cached
 from path_utils import get_resource_path
+from config import CONFIGS
 
 # 类型别名定义
 Align = Literal["left", "center", "right"]
@@ -43,17 +44,10 @@ def draw_content_auto(
     bottom_right: Tuple[int, int],
     text: Optional[str] = None,
     content_image: Optional[Image.Image] = None,
-    text_align: Align = "left",
-    text_valign: VAlign = "top",
     image_align: Align = "center",
     image_valign: VAlign = "middle",
-    color: Tuple[int, int, int] = (255, 255, 255),
-    bracket_color: Tuple[int, int, int] = (137, 177, 251),
-    max_font_height: Optional[int] = None,
-    font_name: Optional[str] = None,
     line_spacing: float = 0.15,
     image_padding: int = 12,
-    compression_settings: Optional[dict] = None,
     min_image_ratio: float = 0.2,  # 图片区域最小比例
 ) -> bytes:
     # 在指定矩形内自适应绘制文本和/或图片
@@ -65,26 +59,47 @@ def draw_content_auto(
     #     bottom_right: 区域右下角坐标
     #     text: 要绘制的文本
     #     content_image: 要绘制的图片
-    #     text_align: 文本水平对齐方式
-    #     text_valign: 文本垂直对齐方式
     #     image_align: 图片水平对齐方式
     #     image_valign: 图片垂直对齐方式
-    #     color: 文本颜色
-    #     bracket_color: 括号颜色
-    #     max_font_height: 最大字体高度
-    #     font_name: 字体名称
     #     line_spacing: 行间距比例
     #     image_padding: 图片内边距
-    #     compression_settings: 压缩设置
     #     min_image_ratio: 图片区域最小比例
 
     PLACEHOLDER_CHAR = "□"  # 用来占位 emoji 的字符
     EMOJI_FALLBACK_CHAR = "□"  # emoji 加载失败时使用的替代字符
 
+    # 使用样式配置中的默认值
+    text_align = CONFIGS.style.text_align
+    text_valign = CONFIGS.style.text_valign
+    max_font_height = CONFIGS.style.font_size
+    
+    # 从十六进制颜色转换为RGB
+    def hex_to_rgb(hex_color: str) -> tuple:
+        hex_color = hex_color.lstrip('#')
+        if len(hex_color) == 3:
+            hex_color = ''.join([c*2 for c in hex_color])
+        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    
+    color = hex_to_rgb(CONFIGS.style.text_color)
+    
+    # 获取强调色
+    character_name = CONFIGS.get_character()
+    bracket_color_hex = CONFIGS.style.get_bracket_color(character_name)
+    bracket_color = hex_to_rgb(bracket_color_hex)
+    
+    # 获取字体名称
+    font_name = CONFIGS.style.font_family
+    
+    # 应用文本偏移
+    if CONFIGS.style.text_offset_x != 0 or CONFIGS.style.text_offset_y != 0:
+        x1, y1 = top_left
+        x2, y2 = bottom_right
+        top_left = (x1 + CONFIGS.style.text_offset_x, y1 + CONFIGS.style.text_offset_y)
+        bottom_right = (x2 + CONFIGS.style.text_offset_x, y2 + CONFIGS.style.text_offset_y)
+
     # 字体加载函数
     def load_font(size: int) -> ImageFont.FreeTypeFont:
-        font_to_use = font_name if font_name else "font3.ttf"
-        return load_font_cached(font_to_use, size)
+        return load_font_cached(font_name, size)
 
     # --- 辅助函数：提取emoji并替换为占位符 ---
     def extract_emojis_and_replace(src: str, placeholder: str = PLACEHOLDER_CHAR):
@@ -527,8 +542,8 @@ def draw_content_auto(
         st=time.time()
         
     # --- 压缩图片 ---
-    if compression_settings is not None:
-        reduction_ratio = compression_settings.get("pixel_reduction_ratio", 50) / 100.0
+    if CONFIGS.gui_settings.get("image_compression", None) is not None:
+        reduction_ratio = CONFIGS.gui_settings["image_compression"].get("pixel_reduction_ratio", 50) / 100.0
         new_width = max(int(img.width * (1 - reduction_ratio)), 300)
         new_height = max(int(img.height * (1 - reduction_ratio)), 100)
         img = img.resize((new_width, new_height), Image.Resampling.BILINEAR)

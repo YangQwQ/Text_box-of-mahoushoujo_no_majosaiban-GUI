@@ -20,7 +20,7 @@ class SettingsWindow:
         # 创建窗口
         self.window = tk.Toplevel(parent)
         self.window.title("设置")
-        self.window.geometry("450x675")
+        self.window.geometry("450x550")
         self.window.resizable(False, False)
         self.window.transient(parent)
         self.window.grab_set()
@@ -105,122 +105,6 @@ class SettingsWindow:
         # 添加内部边距，防止内容紧贴边缘
         content_frame = ttk.Frame(scrollable_frame, padding="10")
         content_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # 字体设置
-        font_frame = ttk.LabelFrame(content_frame, text="字体设置", padding="10")
-        font_frame.pack(fill=tk.X, pady=5, padx=5)
-        
-        ttk.Label(font_frame, text="对话框字体:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        
-        # 获取可用字体列表
-        available_fonts = self._get_available_fonts()
-        
-        self.font_family_var = tk.StringVar(
-            value=CONFIGS.gui_settings.get("font_family", "Arial")
-        )
-        font_combo = ttk.Combobox(
-            font_frame,
-            textvariable=self.font_family_var,
-            values=available_fonts,
-            state="readonly"
-        )
-        font_combo.grid(row=0, column=1, sticky=tk.EW, pady=5, padx=5)
-        
-        # 字号设置
-        ttk.Label(font_frame, text="对话框字号:").grid(
-            row=1, column=0, sticky=tk.W, pady=5
-        )
-        self.font_size_var = tk.IntVar(value=CONFIGS.gui_settings.get("font_size", 12))
-        font_size_spin = ttk.Spinbox(
-            font_frame, textvariable=self.font_size_var, from_=8, to=120
-        )
-        font_size_spin.grid(row=1, column=1, sticky=tk.EW, pady=5, padx=5)
-        font_size_spin.bind("<KeyRelease>", self._on_setting_changed)
-        font_size_spin.bind("<<Increment>>", self._on_setting_changed)
-        font_size_spin.bind("<<Decrement>>", self._on_setting_changed)
-        
-        # 字体说明
-        ttk.Label(font_frame, text="注：角色名字字体保持不变，使用角色配置中的专用字体", 
-                font=("", 8), foreground="gray").grid(
-            row=2, column=0, columnspan=2, sticky=tk.W, pady=2
-        )
-        
-        # 文字颜色设置
-        ttk.Label(font_frame, text="文字颜色:").grid(
-            row=3, column=0, sticky=tk.W, pady=5
-        )
-        
-        color_frame = ttk.Frame(font_frame)
-        color_frame.grid(row=3, column=1, sticky=tk.EW, pady=5, padx=5)
-        
-        self.text_color_var = tk.StringVar(
-            value=CONFIGS.gui_settings.get("text_color", "#FFFFFF")
-        )
-        color_entry = ttk.Entry(
-            color_frame,
-            textvariable=self.text_color_var
-        )
-        color_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        color_entry.bind("<KeyRelease>", self._on_setting_changed)
-        
-        # 颜色预览标签
-        self.color_preview_label = ttk.Label(
-            color_frame,
-            text="   ",
-            background=self.text_color_var.get(),
-            relief="solid",
-            width=3
-        )
-        self.color_preview_label.pack(side=tk.LEFT)
-        
-        # 绑定变量变化更新预览
-        def on_color_change(*args):
-            self._update_color_preview()
-            self._on_setting_changed()
-        
-        self.text_color_var.trace_add("write", on_color_change)
-        
-        # 强调颜色设置
-        ttk.Label(font_frame, text="强调颜色:").grid(
-            row=4, column=0, sticky=tk.W, pady=5
-        )
-        
-        bracket_color_frame = ttk.Frame(font_frame)
-        bracket_color_frame.grid(row=4, column=1, sticky=tk.EW, pady=5, padx=5)
-        
-        self.bracket_color_var = tk.StringVar(
-            value=CONFIGS.gui_settings.get("bracket_color", "#EF4F54")
-        )
-        bracket_color_entry = ttk.Entry(
-            bracket_color_frame,
-            textvariable=self.bracket_color_var
-        )
-        bracket_color_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        bracket_color_entry.bind("<KeyRelease>", self._on_setting_changed)
-        
-        # 强调颜色预览标签
-        self.bracket_color_preview_label = ttk.Label(
-            bracket_color_frame,
-            text="   ",
-            background=self.bracket_color_var.get(),
-            relief="solid",
-            width=3
-        )
-        self.bracket_color_preview_label.pack(side=tk.LEFT)
-        
-        # 绑定变量变化更新预览
-        def on_bracket_color_change(*args):
-            self._update_bracket_color_preview()
-            self._on_setting_changed()
-        
-        self.bracket_color_var.trace_add("write", on_bracket_color_change)
-        
-        # 强调颜色说明
-        ttk.Label(font_frame, 
-                text="注：该颜色控制括号内容的颜色", 
-                font=("", 8), foreground="gray").grid(
-            row=5, column=0, columnspan=2, sticky=tk.W, pady=2
-        )
         
         # 获取情感匹配设置
         sentiment_settings = CONFIGS.gui_settings.get("sentiment_matching", {})
@@ -325,7 +209,6 @@ class SettingsWindow:
         )
         
         # 配置列权重，使内容可以水平扩展
-        font_frame.columnconfigure(1, weight=1)
         if sentiment_settings.get("display", False):
             compression_frame.columnconfigure(1, weight=1)
 
@@ -895,37 +778,11 @@ class SettingsWindow:
     def _on_setting_changed(self, event=None):
         """设置改变时的回调"""
         # 更新设置字典
-        CONFIGS.gui_settings["font_family"] = self.font_family_var.get()
-        CONFIGS.gui_settings["font_size"] = self.font_size_var.get()
-
-        # 只在颜色有效时更新设置中的颜色值
-        color_value = self.text_color_var.get()
-        if self._validate_color_format(color_value):
-            # 更新颜色预览
-            self.color_preview_label.configure(background=color_value)
-            # 更新设置字典中的颜色值
-            CONFIGS.gui_settings["text_color"] = color_value
-        else:
-            # 颜色无效时，不更新设置字典，保持之前的有效值
-            pass
-        
-        # 更新强调颜色设置
-        bracket_color_value = self.bracket_color_var.get()
-        if self._validate_color_format(bracket_color_value):
-            # 更新强调颜色预览
-            self.bracket_color_preview_label.configure(background=bracket_color_value)
-            # 更新设置字典中的强调颜色值
-            CONFIGS.gui_settings["bracket_color"] = bracket_color_value
-        else:
-            # 颜色无效时，不更新设置字典，保持之前的有效值
-            pass
-        
         if (CONFIGS.gui_settings["sentiment_matching"].get("display",False)):
             # 更新情感匹配设置
             if "sentiment_matching" not in CONFIGS.gui_settings:
                 CONFIGS.gui_settings["sentiment_matching"] = {}
             
-            # CONFIGS.gui_settings["sentiment_matching"]["enabled"] = self.sentiment_enabled_var.get()
             CONFIGS.gui_settings["sentiment_matching"]["ai_model"] = self.ai_model_var.get()
             
             # 保存模型配置
@@ -981,8 +838,6 @@ class SettingsWindow:
 
         # 应用设置时检查是否需要重新初始化AI模型
         self.core._reinitialize_sentiment_analyzer_if_needed()
-        
-        # 注意：我们不在设置窗口内重启热键监听，由父窗口处理
         
         return success
 

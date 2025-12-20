@@ -6,6 +6,7 @@ import threading
 
 from core import ManosabaCore
 from gui_settings import SettingsWindow
+from gui_style import StyleWindow
 from gui_about import AboutWindow
 from gui_hotkeys import HotkeyManager
 from gui_components import PreviewManager, StatusManager
@@ -30,6 +31,7 @@ class ManosabaGUI:
         self.preview_manager = PreviewManager(self)
         self.status_manager = StatusManager(self)
         self.about_window = None  # 关于窗口实例
+        self.style_window = None  # 样式窗口实例
 
         # 图片生成状态
         self.is_generating = False
@@ -262,10 +264,14 @@ class ManosabaGUI:
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
 
-        # 创建一个单独的设置按钮，而不是下拉菜单
         menubar.add_command(label="设置", command=self.open_settings)
-        # menubar.add_command(label="样式", command=self.open_layout) #(编辑对话框的角色名字位置和字号及颜色之类的)
+        menubar.add_command(label="样式", command=self.open_style)
         menubar.add_command(label="关于", command=self.open_about)
+
+    def open_style(self):
+        """打开样式编辑窗口"""
+        # 打开样式窗口
+        self.style_window = StyleWindow(self.root, self.core, self)
 
     def open_about(self):
         """打开关于窗口"""
