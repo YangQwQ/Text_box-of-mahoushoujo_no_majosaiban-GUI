@@ -1,10 +1,8 @@
 """设置窗口模块"""
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 import threading
-import copy
-import json
 from config import CONFIGS
 
 
@@ -26,6 +24,10 @@ class SettingsWindow:
         self.window.resizable(False, False)
         self.window.transient(parent)
         self.window.grab_set()
+
+        # 添加图标
+        from path_utils import set_window_icon
+        set_window_icon(self.window)
 
         # 添加窗口关闭事件处理
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -138,26 +140,6 @@ class SettingsWindow:
             command=lambda: setattr(self, 'settings_changed', True)
         )
         preload_background_cb.grid(row=0, column=1, sticky=tk.W, pady=5)
-        
-        # 背景图缓存宽度选择
-        ttk.Label(preloading_frame, text="背景图宽度:").grid(
-            row=1, column=0, sticky=tk.W, pady=5
-        )
-        
-        # 宽度选项
-        width_options = [2560, 1920, 1440, 720]
-        self.background_width_var = tk.IntVar(
-            value=preloading_settings.get("background_cache_width", 2560)
-        )
-        width_combo = ttk.Combobox(
-            preloading_frame,
-            textvariable=self.background_width_var,
-            values=width_options,
-            state="readonly",
-            width=10
-        )
-        width_combo.grid(row=1, column=1, sticky=tk.W, pady=5, padx=5)
-        width_combo.bind("<<ComboboxSelected>>", lambda e: setattr(self, 'settings_changed', True))
         
         # 预加载说明
         ttk.Label(preloading_frame, 
@@ -799,8 +781,7 @@ class SettingsWindow:
         settings = {
             "preloading": {
                 "preload_character": self.preload_character_var.get(),
-                "preload_background": self.preload_background_var.get(),
-                "background_cache_width": self.background_width_var.get()
+                "preload_background": self.preload_background_var.get()
             },
             "image_compression": {
                 "pixel_reduction_enabled": self.pixel_reduction_var.get(),
@@ -898,11 +879,11 @@ class SettingsWindow:
                 if (old_preload_char != new_preload_char and new_preload_char):
                     # 触发预加载当前角色
                     current_character = CONFIGS.get_character()
-                    self.gui.core.preload_manager.preload_character_images_async(current_character)
+                    self.gui.core.preload_manager.submit_preload_task('character', character_name=current_character)
                 
                 # 如果背景预加载从关闭变为开启
                 if (old_preload_bg != new_preload_bg and new_preload_bg):
-                    self.gui.core.preload_manager.preload_backgrounds_async()
+                    self.gui.core.preload_manager.submit_preload_task('background')
                 
             # 应用设置时检查是否需要重新初始化AI模型
             self.core._reinitialize_sentiment_analyzer_if_needed()

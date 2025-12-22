@@ -8,7 +8,7 @@
     enabled: true
     layer: 0
     offset_x: 900
-    offset_y: -800
+    offset_y: -700
     overlay: ''
     scale: 1.4
     type: character
@@ -93,7 +93,7 @@ default:
     enabled: true
     layer: 3
     offset_x: 0
-    offset_y: 0
+    offset_y: 50
     overlay: ''
     scale: 1.6
     type: character
@@ -125,3 +125,125 @@ default:
   textbox_x: 760
   textbox_y: 355
   use_character_color: false
+思索:
+  aspect_ratio: '5:4'
+  bracket_color: '#ef4f54'
+  font_family: font3
+  font_size: 80
+  image_components:
+  - align: bottom-left
+    enabled: false
+    layer: 0
+    offset_x: 900
+    offset_y: -700
+    overlay: ''
+    scale: 1.4
+    type: character
+  - align: bottom-center
+    enabled: false
+    layer: 1
+    offset_x: 0
+    offset_y: 0
+    overlay: 文本框1.webp
+    scale: 1.0
+    type: textbox
+  - align: bottom-left
+    enabled: false
+    layer: 2
+    offset_x: 200
+    offset_y: -300
+    overlay: 名字框.webp
+    scale: 1.0
+    type: namebox
+  - align: middle-right
+    enabled: true
+    id: extra_9
+    layer: 3
+    offset_x: 0
+    offset_y: 0
+    overlay: 思考-背景5：4.webp
+    scale: 1.5
+    type: extra
+  - align: middle-right
+    enabled: true
+    id: extra_3
+    layer: 4
+    offset_x: -840
+    offset_y: 400
+    overlay: 思考-小对话框.webp
+    scale: 1.5
+    type: extra
+  - align: middle-right
+    enabled: true
+    id: extra_2
+    layer: 5
+    offset_x: -800
+    offset_y: -100
+    overlay: 思考-红对话框.webp
+    scale: 1.55
+    type: extra
+  - align: middle-left
+    enabled: false
+    id: extra_6
+    layer: 6
+    offset_x: 150
+    offset_y: -270
+    overlay: 思考-赞同.webp
+    scale: 1.5
+    type: extra
+  - align: middle-left
+    enabled: true
+    id: extra_7
+    layer: 7
+    offset_x: 150
+    offset_y: -270
+    overlay: 思考-反驳.webp
+    scale: 1.5
+    type: extra
+  - align: middle-left
+    enabled: false
+    id: extra_8
+    layer: 8
+    offset_x: 150
+    offset_y: -270
+    overlay: 思考-疑问.webp
+    scale: 1.5
+    type: extra
+  - align: bottom-right
+    enabled: false
+    id: extra_4
+    layer: 9
+    offset_x: 0
+    offset_y: 0
+    overlay: 思考-艾玛.webp
+    scale: 1.4
+    type: extra
+  - align: bottom-right
+    enabled: true
+    id: extra_5
+    layer: 10
+    offset_x: 0
+    offset_y: 0
+    overlay: 思考-希罗.webp
+    scale: 1.4
+    type: extra
+  paste_image_settings:
+    align: center
+    enabled: always
+    fill_mode: width
+    height: 700
+    valign: bottom
+    width: 1500
+    x: 200
+    y: 1200
+  shadow_color: '#000000'
+  shadow_offset_x: 3
+  shadow_offset_y: 3
+  text_align: center
+  text_color: '#FFFFFF'
+  text_valign: middle
+  textbox_height: 280
+  textbox_width: 1200
+  textbox_x: 300
+  textbox_y: 770
+  use_character_color: true

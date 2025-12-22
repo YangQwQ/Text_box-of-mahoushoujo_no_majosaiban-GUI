@@ -74,6 +74,10 @@ class StyleWindow:
         self.window.resizable(True, True)
         self.window.transient(parent)
         self.window.grab_set()
+
+        # 添加图标
+        from path_utils import set_window_icon
+        set_window_icon(self.window)
         
         # 添加窗口关闭事件处理
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -81,44 +85,73 @@ class StyleWindow:
         # 组件UI控件存储
         self.component_widgets = {}
         
+        # 用于优化滚动的变量
+        self._scroll_scheduled = False
+        self._last_scroll_time = 0
+        self._scroll_after_id = None
+        
         self._setup_ui()
     
     def _setup_ui(self):
         """设置UI界面"""
-        # 创建滚动容器
-        self.main_canvas = tk.Canvas(self.window, highlightthickness=0)  # 改为实例变量
-        v_scrollbar = ttk.Scrollbar(self.window, orient=tk.VERTICAL, command=self.main_canvas.yview)
-        h_scrollbar = ttk.Scrollbar(self.window, orient=tk.HORIZONTAL, command=self.main_canvas.xview)
+        # 创建主容器框架
+        main_container = ttk.Frame(self.window)
+        main_container.pack(fill=tk.BOTH, expand=True)
         
-        # 创建可滚动框架
-        scrollable_frame = ttk.Frame(self.main_canvas)
+        # 创建滚动容器
+        self.main_canvas = tk.Canvas(main_container, highlightthickness=0, bg='white')
+        v_scrollbar = ttk.Scrollbar(main_container, orient=tk.VERTICAL, command=self.main_canvas.yview)
         
         # 配置canvas
-        self.main_canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        self.main_canvas.configure(yscrollcommand=v_scrollbar.set)
+        
+        # 创建可滚动框架
+        self.scrollable_frame = ttk.Frame(self.main_canvas, style='Scrollable.TFrame')
         
         # 创建窗口并设置合适的宽度
-        canvas_frame = self.main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        self.canvas_frame = self.main_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         
-        # 更新函数确保框架宽度正确
-        def update_scrollable_frame_width(event=None):
-            # 获取canvas当前宽度
-            canvas_width = self.main_canvas.winfo_width()
-            if canvas_width > 10:  # 确保有有效宽度
-                # 减少右侧边距，使内容更靠近窗口边缘
-                self.main_canvas.itemconfig(canvas_frame, width=canvas_width)
+        # 优化滚动性能：减少滚动时的更新频率
+        def on_canvas_configure(event):
+            # 更新Canvas的滚动区域
+            bbox = self.main_canvas.bbox("all")
+            if bbox:
+                self.main_canvas.configure(scrollregion=bbox)
+            
+            # 设置框架宽度为Canvas宽度（减去滚动条宽度）
+            canvas_width = event.width
+            if canvas_width > 10:
+                # 设置一个最小宽度，确保内容不会被压缩
+                min_width = 450
+                frame_width = max(min_width, canvas_width)
+                self.main_canvas.itemconfig(self.canvas_frame, width=frame_width)
         
-        scrollable_frame.bind("<Configure>", lambda e: self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all")))
-        self.main_canvas.bind("<Configure>", update_scrollable_frame_width)
+        def on_frame_configure(event):
+            # 延迟更新滚动区域，避免频繁更新
+            if not self._scroll_scheduled:
+                self._scroll_scheduled = True
+                self._scroll_after_id = self.window.after(50, self._update_scroll_region)
+        
+        # 绑定事件
+        self.main_canvas.bind("<Configure>", on_canvas_configure)
+        self.scrollable_frame.bind("<Configure>", on_frame_configure)
+        
+        # 绑定鼠标滚轮事件
+        def on_mouse_wheel(event):
+            # 优化滚动：使用更平滑的滚动
+            delta = -1 if event.delta > 0 else 1
+            self.main_canvas.yview_scroll(delta, "units")
+            return "break"
+        
+        # 绑定滚轮事件
+        self.main_canvas.bind_all("<MouseWheel>", on_mouse_wheel)
         
         # 布局滚动组件
-        self.main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # 初始更新一次宽度
-        self.window.after(100, update_scrollable_frame_width)
+        self.main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # 添加内部边距，使用更小的边距
-        content_frame = ttk.Frame(scrollable_frame, padding="15")
+        content_frame = ttk.Frame(self.scrollable_frame, padding="15")
         content_frame.pack(fill=tk.BOTH, expand=True)
         
         # 配置文件管理部分
@@ -152,6 +185,16 @@ class StyleWindow:
         ttk.Button(button_frame, text="取消", command=self._on_close).pack(
             side=tk.RIGHT, padx=5
         )
+        
+        # 初始更新一次滚动区域
+        self.window.after(100, self._update_scroll_region)
+    
+    def _update_scroll_region(self):
+        """更新滚动区域 - 优化版本"""
+        self._scroll_scheduled = False
+        bbox = self.main_canvas.bbox("all")
+        if bbox:
+            self.main_canvas.configure(scrollregion=bbox)
     
     def _setup_style_management(self, parent):
         """设置配置文件管理部分"""
@@ -198,7 +241,7 @@ class StyleWindow:
             text="3:1 (默认)",
             variable=self.aspect_ratio_var,
             value="3:1",
-            command=lambda: setattr(self, 'style_changed', True)
+            command=lambda: self._on_aspect_ratio_changed()
         ).pack(side=tk.LEFT, padx=10)
         
         ttk.Radiobutton(
@@ -206,7 +249,7 @@ class StyleWindow:
             text="5:4",
             variable=self.aspect_ratio_var,
             value="5:4",
-            command=lambda: setattr(self, 'style_changed', True)
+            command=lambda: self._on_aspect_ratio_changed()
         ).pack(side=tk.LEFT, padx=10)
         
         ttk.Radiobutton(
@@ -214,7 +257,7 @@ class StyleWindow:
             text="16:9",
             variable=self.aspect_ratio_var,
             value="16:9",
-            command=lambda: setattr(self, 'style_changed', True)
+            command=lambda: self._on_aspect_ratio_changed()
         ).pack(side=tk.LEFT, padx=10)
         
         ttk.Label(
@@ -223,6 +266,12 @@ class StyleWindow:
             font=("", 8),
             foreground="gray"
         ).pack(anchor=tk.W, pady=5)
+
+    def _on_aspect_ratio_changed(self):
+        """图片比例改变事件"""
+        self.style_changed = True
+        # 标记背景缓存需要清除
+        self._need_clear_background_cache = True
     
     def _setup_font_settings(self, parent):
         """设置字体相关设置"""
@@ -858,6 +907,59 @@ class StyleWindow:
         # 加载现有组件
         self._load_image_components()
     
+    def _add_image_component(self):
+        """添加新的图片组件"""
+        # 确保_temp_components存在
+        if not hasattr(self, '_temp_components'):
+            self._temp_components = copy.deepcopy(CONFIGS.style.image_components)
+        
+        # 获取所有额外组件的ID
+        existing_extra_ids = []
+        for component in self._temp_components:
+            if component.get("type") == "extra":
+                component_id = component.get("id", "")
+                if component_id and component_id.startswith("extra_"):
+                    try:
+                        num = int(component_id.split("_")[1])
+                        existing_extra_ids.append(num)
+                    except (IndexError, ValueError):
+                        pass
+        
+        # 生成新的唯一ID
+        new_id_num = max(existing_extra_ids) + 1 if existing_extra_ids else 1
+        new_component_id = f"extra_{new_id_num}"
+        
+        # 获取所有组件的图层值
+        layers = [comp.get("layer", 0) for comp in self._temp_components]
+        new_layer = max(layers) + 1 if layers else 0
+        
+        # 创建默认的额外组件配置
+        component_config = {
+            "type": "extra",
+            "id": new_component_id,  # 明确设置ID
+            "enabled": True,
+            "overlay": "",
+            "align": "top-left",
+            "offset_x": 0,
+            "offset_y": 0,
+            "scale": 1.0,
+            "layer": new_layer
+        }
+        
+        # 添加到临时组件列表
+        self._temp_components.append(component_config)
+        
+        # 创建新组件的UI
+        self._create_component_ui(component_config)
+        
+        # 修复：立即按图层顺序重新排序所有UI组件
+        self._reorder_component_uis_no_recreate()
+        
+        # 更新图层显示
+        self._update_layer_display()
+        
+        self.components_changed = True
+
     def _create_component_ui(self, component, index=None):
         """创建组件UI - 使用pack布局"""
         component_type = component.get("type", "extra")
@@ -870,14 +972,22 @@ class StyleWindow:
         elif component_type == "namebox":
             component_id = "namebox"
         else:
+            # 修复：直接使用配置中的ID，而不是重新生成
             component_id = component.get("id", f"extra_{len(self.component_widgets)}")
+            # 确保ID的唯一性
+            if component_id in self.component_widgets:
+                # 如果ID已存在，生成新的唯一ID
+                existing_ids = [c.get("id", "") for c in self.component_widgets.keys() if "extra" in c]
+                i = 1
+                while f"extra_{i}" in existing_ids:
+                    i += 1
+                component_id = f"extra_{i}"
         
         # 获取图层值
         layer_value = component.get("layer", 0)
         
         # 创建组件框架
         comp_frame = ttk.Frame(self.components_container, relief="solid", padding=8)
-        comp_frame.pack(fill=tk.X, pady=3, padx=2)
         
         # 在框架右上角显示图层顺序
         layer_label = ttk.Label(
@@ -917,7 +1027,11 @@ class StyleWindow:
             width=8
         )
         scale_entry.pack(side=tk.LEFT, padx=(0, 10))
-        scale_entry.bind("<KeyRelease>", lambda e: self._on_component_changed(component_id))
+        # 角色组件的缩放改变时需要特殊处理
+        if component_type == "character":
+            scale_entry.bind("<KeyRelease>", lambda e: self._on_character_scale_changed(component_id))
+        else:
+            scale_entry.bind("<KeyRelease>", lambda e: self._on_component_changed(component_id))
         
         # 图层控制按钮（靠右对齐）
         controls_frame = ttk.Frame(row_frame1)
@@ -1031,52 +1145,38 @@ class StyleWindow:
                 "offset_x_var": offset_x_var,
                 "offset_y_var": offset_y_var,
                 "scale_var": scale_var
-            }
+            },
+            "original_id": component.get("id")  # 保存原始ID
         }
-        
+
         return component_id
-    
-    def _add_image_component(self):
-        """添加新的图片组件"""
-        # 获取所有组件的图层值
-        layers = []
-        for component in CONFIGS.style.image_components:
-            layers.append(component.get("layer", 0))
-        
-        # 找到可用的最小图层序号
-        new_layer = 0
-        while new_layer in layers:
-            new_layer += 1
-        
-        # 创建默认的额外组件配置
-        component_config = {
-            "type": "extra",
-            "enabled": True,
-            "overlay": "",
-            "align": "top-left",
-            "offset_x": 0,
-            "offset_y": 0,
-            "scale": 1.0,
-            "layer": new_layer,
-            "id": f"extra_{len([c for c in CONFIGS.style.image_components if c.get('type') == 'extra']) + 1}"
-        }
-        
-        # 添加到临时组件列表（不直接修改CONFIGS）
-        self._temp_components = copy.deepcopy(CONFIGS.style.image_components)
-        self._temp_components.append(component_config)
-        
-        # 重新加载所有组件以确保正确显示
-        self._load_image_components()
-        self.components_changed = True
+
+    def _on_character_scale_changed(self, component_id):
+        """角色缩放改变事件"""
+        self._on_component_changed(component_id)
+        # 标记角色缓存需要清除
+        self._need_clear_character_cache = True
     
     def _remove_component(self, component_id):
         """删除组件"""
+        if component_id not in self.component_widgets:
+            return
+        
+        # 确保_temp_components存在
+        if not hasattr(self, '_temp_components'):
+            self._temp_components = copy.deepcopy(CONFIGS.style.image_components)
+        
         # 从临时组件列表中移除
         self._temp_components = [c for c in self._temp_components 
-                               if not (c.get("type") == "extra" and c.get("id") == component_id)]
+                            if not (c.get("type") == "extra" and c.get("id") == component_id)]
         
-        # 重新加载所有组件以确保UI正确显示
-        self._load_image_components()
+        # 从UI中移除组件的框架
+        if component_id in self.component_widgets:
+            frame = self.component_widgets[component_id]["frame"]
+            frame.destroy()
+            del self.component_widgets[component_id]
+        
+        # 标记组件已修改
         self.components_changed = True
     
     def _move_component_up(self, component_id):
@@ -1192,10 +1292,6 @@ class StyleWindow:
         frame1.pack_forget()
         frame2.pack_forget()
         
-        # 记录当前滚动位置
-        if hasattr(self, 'main_canvas'):
-            original_yview = self.main_canvas.yview()
-        
         # 获取所有组件按图层排序
         components_by_layer = []
         for comp_id, component_ui in self.component_widgets.items():
@@ -1212,18 +1308,9 @@ class StyleWindow:
         # 按新的图层顺序重新pack（图层值大的在上）
         for layer, component_id, frame in components_by_layer:
             frame.pack(fill=tk.X, pady=3, padx=2)
-        
-        # 恢复滚动位置
-        if hasattr(self, 'main_canvas') and original_yview:
-            self.window.update_idletasks()  # 等待UI更新
-            self.main_canvas.yview_moveto(original_yview[0])
 
     def _reorder_component_uis_no_recreate(self):
         """重新排序组件UI但不重新创建 - 优化版"""
-        # 记录当前滚动位置
-        if hasattr(self, 'main_canvas'):
-            original_yview = self.main_canvas.yview()
-        
         # 获取所有组件按图层排序
         components_by_layer = []
         for component_id, component_ui in self.component_widgets.items():
@@ -1240,11 +1327,6 @@ class StyleWindow:
         # 按新的图层顺序重新pack（图层值大的在上）
         for layer, component_id, frame in components_by_layer:
             frame.pack(fill=tk.X, pady=3, padx=2)
-        
-        # 恢复滚动位置
-        if hasattr(self, 'main_canvas') and original_yview:
-            self.window.update_idletasks()  # 等待UI更新
-            self.main_canvas.yview_moveto(original_yview[0])
 
     def _update_layer_display(self):
         """更新所有组件的图层显示"""
@@ -1256,25 +1338,34 @@ class StyleWindow:
         """组件设置改变"""
         # 标记组件已修改
         self.components_changed = True
-    
+
     def _load_image_components(self):
-        """加载图片组件 - 重新创建所有UI"""
-        # 清空现有组件UI
-        for widget in self.components_container.winfo_children():
-            widget.destroy()
-        self.component_widgets.clear()
-        
-        # 初始化临时组件列表
+        """加载图片组件"""
+        # 只有在没有组件时才清空，或者当_temp_components不存在时
         if not hasattr(self, '_temp_components'):
             self._temp_components = copy.deepcopy(CONFIGS.style.image_components)
+            # 清空现有组件UI
+            for widget in self.components_container.winfo_children():
+                widget.destroy()
+            self.component_widgets.clear()
+        else:
+            # 如果有_temp_components且组件已存在，不进行任何操作
+            if self.component_widgets:
+                return
         
         # 按图层值降序加载组件（图层值大的先加载，显示在上方）
         sorted_components = sorted(self._temp_components, 
-                                  key=lambda x: x.get("layer", 0), reverse=True)
+                                key=lambda x: x.get("layer", 0), reverse=True)
         
         # 加载所有组件
         for component in sorted_components:
             self._create_component_ui(component)
+        
+        # 修复：初始加载时也需要按图层排序并显示
+        self._reorder_component_uis_no_recreate()
+        
+        # 更新图层显示
+        self._update_layer_display()
     
     def _get_shader_files(self):
         """获取shader文件夹中的图片文件列表"""
@@ -1292,6 +1383,14 @@ class StyleWindow:
         """样式选择改变事件 - 修复：完全重新构建UI"""
         style_name = self.style_var.get()
         
+        # 清理所有缓存（包括背景、角色和组件缓存）
+        if self.core and hasattr(self.core, 'preload_manager'):
+            self.core.preload_manager.clear_caches()
+        
+        # 检查样式哈希变化
+        if hasattr(self.core, 'component_cache_manager'):
+            self.core.component_cache_manager.update_style_hash()
+
         # 加载新样式配置
         CONFIGS.apply_style(style_name)
         
@@ -1317,6 +1416,20 @@ class StyleWindow:
         # 如果预览了文本区，清除标志
         if(hasattr(self, '_is_previewing')):
             self._is_previewing = False
+        
+        # 获取预加载设置
+        preloading_settings = CONFIGS.gui_settings.get("preloading", {})
+        preload_character = preloading_settings.get("preload_character", True)
+        preload_background = preloading_settings.get("preload_background", True)
+
+        # 如果开启了角色预加载，重新预加载当前角色
+        if preload_character and self.gui and hasattr(self.gui.core, 'preload_manager'):
+            current_character = CONFIGS.get_character()
+            self.gui.core.preload_manager.submit_preload_task('character', character_name=current_character)
+        
+        # 如果开启了背景预加载，重新预加载背景
+        if preload_background and self.gui and hasattr(self.gui.core, 'preload_manager'):
+            self.gui.core.preload_manager.submit_preload_task('background')
     
     def _rebuild_ui_from_style(self):
         """完全重新构建UI从当前样式"""
@@ -1621,13 +1734,36 @@ class StyleWindow:
             # 没有变化，直接返回成功
             return True
         
+        self.core.preload_manager.clear_caches("component")
         # 更新样式配置
         success = CONFIGS.update_style(style_name, style_data)
         
         if success:
+            # 如果样式或组件有变化，清除组件缓存
+            if self.core and hasattr(self.core, 'component_cache'):
+                self.core.component_cache.clear_cache()
+                self.gui.update_status("样式已更新，组件缓存已刷新")
+            
+            # 检查是否需要清除角色缓存（角色缩放改变）
+            if hasattr(self, '_need_clear_character_cache') and self._need_clear_character_cache:
+                if self.core and hasattr(self.core, 'preload_manager'):
+                    self.core.preload_manager.clear_caches("character")
+                    self.gui.update_status("角色缩放已更新，角色缓存已刷新")
+                    # 重新预加载当前角色
+                    current_character = CONFIGS.get_character()
+                    self.core.preload_manager.submit_preload_task('character', character_name=current_character)
+            
+            # 检查是否需要清除背景缓存（图片比例改变）
+            if hasattr(self, '_need_clear_background_cache') and self._need_clear_background_cache:
+                if self.core and hasattr(self.core, 'preload_manager'):
+                    self.core.preload_manager.clear_caches()
+                    self.gui.update_status("图片比例已更新，背景缓存已刷新")
+                    # 重新预加载背景
+                    self.core.preload_manager.submit_preload_task('background')
+
             # 立即应用样式到当前配置
             CONFIGS.apply_style(style_name)
-            
+
             # 更新原始配置副本
             self.original_style_config = copy.deepcopy(CONFIGS.style_configs.get(style_name, {}))
             self.original_components = copy.deepcopy(CONFIGS.style.image_components)
@@ -1636,9 +1772,13 @@ class StyleWindow:
             if hasattr(self, '_temp_components'):
                 delattr(self, '_temp_components')
             
-            # 重置修改标记
+            # 重置修改标记和特殊标记
             self.style_changed = False
             self.components_changed = False
+            if hasattr(self, '_need_clear_character_cache'):
+                delattr(self, '_need_clear_character_cache')
+            if hasattr(self, '_need_clear_background_cache'):
+                delattr(self, '_need_clear_background_cache')
             
             # 刷新GUI预览
             if self.gui:
@@ -1650,6 +1790,17 @@ class StyleWindow:
             messagebox.showerror("错误", "应用样式失败")
             return False
     
+    def _compare_components(self, comp1, comp2):
+        """比较两个组件配置是否相同"""
+        # 比较关键字段
+        key_fields = ['type', 'overlay', 'align', 'scale', 'offset_x', 'offset_y', 'enabled']
+        
+        for field in key_fields:
+            if comp1.get(field) != comp2.get(field):
+                return True
+        
+        return False
+    
     def _on_save_apply(self):
         """保存并应用样式设置"""
         if(self._on_apply()):
@@ -1657,4 +1808,12 @@ class StyleWindow:
 
     def _on_close(self):
         """处理窗口关闭事件"""
+        # 取消所有延迟执行的任务
+        if hasattr(self, '_scroll_after_id'):
+            self.window.after_cancel(self._scroll_after_id)
+        
+        # 解绑鼠标滚轮事件
+        self.main_canvas.unbind_all("<MouseWheel>")
+        
+        # 销毁窗口
         self.window.destroy()

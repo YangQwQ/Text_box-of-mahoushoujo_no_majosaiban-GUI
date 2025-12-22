@@ -32,6 +32,10 @@ class AboutWindow:
         self.window.transient(self.parent)
         self.window.grab_set()
 
+        # 添加图标
+        from path_utils import set_window_icon
+        set_window_icon(self.window)
+
         # 获取窗口背景颜色
         self.bg_color = self.window.cget("background")
 

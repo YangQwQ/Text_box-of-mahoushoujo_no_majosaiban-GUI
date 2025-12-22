@@ -26,6 +26,10 @@ class ManosabaGUI:
         self.root.title("魔裁文本框生成器")
         self.root.geometry("700x650")
 
+        # 添加图标
+        from path_utils import set_window_icon
+        set_window_icon(self.root)
+            
         # 初始化管理器
         self.hotkey_manager = HotkeyManager(self)
         self.preview_manager = PreviewManager(self)
@@ -594,7 +598,7 @@ class ManosabaGUI:
     def update_status(self, message: str):
         """更新状态栏"""
         if hasattr(self,"status_manager"):
-            self.status_manager.update_status(message)
+            self.status_manager.update_status(message)  
 
     def run(self):
         """运行 GUI"""

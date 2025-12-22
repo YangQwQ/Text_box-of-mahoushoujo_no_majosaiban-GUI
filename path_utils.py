@@ -15,6 +15,16 @@ def get_base_path():
     
     return base_path
 
+def set_window_icon(window, icon_name="icon.ico"):
+    """为窗口设置图标"""
+    try:
+        icon_path = get_resource_path(os.path.join("assets", icon_name))
+        if os.path.exists(icon_path):
+            window.iconbitmap(icon_path)
+            return True
+    except Exception as e:
+        print(f"设置窗口图标失败: {e}")
+    return False
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径，支持打包环境"""

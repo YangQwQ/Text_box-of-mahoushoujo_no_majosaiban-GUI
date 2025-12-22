@@ -361,7 +361,6 @@ class ConfigLoader:
                 "preloading": {
                 "preload_character": True,
                 "preload_background": True,
-                "background_cache_width": 2560
                 },
                 "image_compression": {
                     "pixel_reduction_enabled": True,
