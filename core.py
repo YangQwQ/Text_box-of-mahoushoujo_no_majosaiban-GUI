@@ -15,7 +15,7 @@ import threading
 from pynput.keyboard import Key, Controller
 from sys import platform
 from PIL import Image, ImageDraw
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any
 
 if platform.startswith("win"):
     try:
@@ -60,12 +60,10 @@ class ManosabaCore:
 
         # 程序启动时开始预加载图片
         if CONFIGS.gui_settings.get("preloading", {}).get("preload_character", True):
-            print("预加载背景")
             current_character = CONFIGS.get_character()
             self.preload_manager.submit_preload_task('character', character_name=current_character)
         
         if CONFIGS.gui_settings.get("preloading", {}).get("preload_background", True):
-            print("预加载背景")
             self.preload_manager.submit_preload_task('background')
     
         # 程序启动时检查是否需要初始化
@@ -92,9 +90,11 @@ class ManosabaCore:
         """生成带角色文字的基础图片"""
         start_time = time.time()
         
+        # 获取画布大小
+        self._canvas_size = calculate_canvas_size()
+
         # 1. 获取排序后的组件列表（按图层升序）
-        sorted_components = sorted(CONFIGS.style.image_components, 
-                                key=lambda x: x.get("layer", 0))
+        sorted_components = CONFIGS.get_sorted_image_components()
         
         canvas = load_background_component_safe(None)
         # 2. 加载背景
@@ -106,7 +106,7 @@ class ManosabaCore:
                 break
         
         if canvas.width != 2560:
-            canvas = canvas.resize(calculate_canvas_size())
+            canvas = canvas.resize(self._canvas_size)
 
         print(f"背景加载用时 {int((time.time()-start_time)*1000)}ms")
         
@@ -117,11 +117,13 @@ class ManosabaCore:
                     if data[1]:
                         canvas = Image.alpha_composite(canvas, data[1])
                     if data[0]:
-                        canvas = self._draw_component(canvas, data[0], character_name, emotion_index)
+                        overlay = self._draw_component(data[0], character_name, emotion_index)
+                        if overlay:
+                            canvas = Image.alpha_composite(canvas, overlay)
         else:
             should_cache = not self.is_style_window_open()
             if should_cache:
-                cache_layer = Image.new("RGBA", (calculate_canvas_size()), (0, 0, 0, 0))
+                cache_layer = Image.new("RGBA", (self._canvas_size), (0, 0, 0, 0))
                 layer_counter = 0
             # 绘制其他组件并缓存
             for component in sorted_components:
@@ -129,24 +131,27 @@ class ManosabaCore:
                     continue
                 
                 # 绘制其他组件
-                canvas = self._draw_component(canvas, component, character_name, emotion_index)
+                target = self._draw_component(component, character_name, emotion_index)
 
                 # 顺带缓存图层
                 if should_cache:
                     if component.get("type") in ["background", "character"] and not (component.get("use_fixed_background", False) or component.get("use_fixed_character", False)):
+                        self._cache_manager.cached_layers_sequence.append((component, cache_layer))
                         if layer_counter > 0:
-                            self._cache_manager.cached_layers_sequence.append((component, cache_layer))
-                            cache_layer = Image.new("RGBA", (calculate_canvas_size()), (0, 0, 0, 0))
+                            cache_layer = Image.new("RGBA", (self._canvas_size), (0, 0, 0, 0))
                         else:
-                            self._cache_manager.cached_layers_sequence.append((component, None))
-                        layer_counter = 0
-                    else:
-                        cache_layer = self._draw_component(cache_layer, component, character_name, emotion_index)
+                            layer_counter = 0
+                    elif target:
+                        cache_layer = Image.alpha_composite(cache_layer, target)
                         layer_counter += 1
+                
+                # 合成图层
+                if target:
+                    canvas = Image.alpha_composite(canvas, target)
             if should_cache and layer_counter > 0:
                 self._cache_manager.cached_layers_sequence.append(({}, cache_layer))
             
-        print(f"图片合成总用时 {int((time.time()-start_time)*1000)}ms")
+        print(f"图片合成用时 {int((time.time()-start_time)*1000)}ms")
         return canvas
 
     def is_style_window_open(self):
@@ -165,31 +170,31 @@ class ManosabaCore:
         except:
             return False
         
-    def _draw_component(self, target, component, character_name=None, emotion_index=None):
+    def _draw_component(self, component, character_name=None, emotion_index=None):
         """统一的组件绘制函数"""
         comp_type = component.get("type")
         
         if comp_type == "textbox":
-            return self._draw_textbox_component(target, component)
+            return self._draw_textbox_component(component)
         elif comp_type == "namebox":
-            return self._draw_namebox_component(target, component, character_name)
+            return self._draw_namebox_component(component, character_name)
         elif comp_type == "character":
-            return self._draw_character_component(target, component, character_name, emotion_index)
+            return self._draw_character_component(component, character_name, emotion_index)
         elif comp_type == "extra":
-            return self._draw_extra_component(target, component)
+            return self._draw_extra_component(component)
         elif comp_type == "text":
-            return self._draw_text_component(target, component, character_name, emotion_index)
-        return target
+            return self._draw_text_component(component)
+        return None
 
-    def _draw_textbox_component(self, target, component):
+    def _draw_textbox_component(self, component):
         """绘制文本框组件"""
         overlay_file = component.get("overlay", "")
         if not overlay_file:
-            return target
+            return None
         
         overlay_path = get_resource_path(os.path.join("assets", "shader", overlay_file))
         if not os.path.exists(overlay_path):
-            return target
+            return None
         
         textbox = load_image_cached(overlay_path)
         
@@ -199,48 +204,31 @@ class ManosabaCore:
             original_width, original_height = textbox.size
             new_width = int(original_width * scale)
             new_height = int(original_height * scale)
-            textbox = textbox.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            textbox = textbox.resize((new_width, new_height), Image.Resampling.BILINEAR)
         
         # 计算粘贴位置
         align = component.get("align", "bottom-center")
         offset_x = component.get("offset_x", 0)
         offset_y = component.get("offset_y", 0)
-        target_width, target_height = target.size
         
-        paste_x, paste_y = calculate_component_position(
-            target_width, target_height,
-            textbox.width, textbox.height,
-            align,
-            offset_x,
-            offset_y
-        )
-        
-        # 确保目标图片和文本框都为RGBA模式
-        if target.mode != 'RGBA':
-            target = target.convert('RGBA')
-        
-        if textbox.mode != 'RGBA':
-            textbox = textbox.convert('RGBA')
+        paste_x, paste_y = calculate_component_position(self._canvas_size[0], self._canvas_size[1],textbox.width, textbox.height,align,offset_x,offset_y)
         
         # 创建透明图层并粘贴文本框
-        overlay_layer = Image.new("RGBA", target.size, (0, 0, 0, 0))
+        overlay_layer = Image.new("RGBA", self._canvas_size, (0, 0, 0, 0))
         overlay_layer.paste(textbox, (paste_x, paste_y), textbox)
         
-        # 使用alpha_composite进行正确的alpha混合
-        target = Image.alpha_composite(target, overlay_layer)
-        
-        return target
+        return overlay_layer
 
-    def _draw_namebox_component(self, target, component, character_name):
+    def _draw_namebox_component(self, component, character_name):
         """绘制名称框组件 - 修复：统一使用alpha_composite进行alpha混合"""
         overlay_file = component.get("overlay", "")
         if not overlay_file:
-            return target
+            return None
         
         # 创建带文字的namebox
         namebox_with_text = self._create_namebox_with_text(character_name, component)
         if not namebox_with_text:
-            return target
+            return None
         
         # 应用缩放
         scale = component.get("scale", 1.2)
@@ -248,36 +236,27 @@ class ManosabaCore:
             original_width, original_height = namebox_with_text.size
             new_width = int(original_width * scale)
             new_height = int(original_height * scale)
-            namebox_with_text = namebox_with_text.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            namebox_with_text = namebox_with_text.resize((new_width, new_height), Image.Resampling.BILINEAR)
         
         # 使用统一位置计算函数
         align = component.get("align", "bottom-left")
-        canvas_width, canvas_height = target.size
+        canvas_width, canvas_height = self._canvas_size
         offset_x = component.get("offset_x", 0)
         offset_y = component.get("offset_y", 0)
         
-        namebox_x, namebox_y = calculate_component_position(
-            canvas_width, canvas_height,
-            namebox_with_text.width, namebox_with_text.height,
-            align,
-            offset_x,
-            offset_y
-        )
+        namebox_x, namebox_y = calculate_component_position(canvas_width, canvas_height,namebox_with_text.width, namebox_with_text.height,align,offset_x,offset_y)
         
         # 创建透明图层并粘贴名称框
-        overlay_layer = Image.new("RGBA", target.size, (0, 0, 0, 0))
+        overlay_layer = Image.new("RGBA", self._canvas_size, (0, 0, 0, 0))
         overlay_layer.paste(namebox_with_text, (namebox_x, namebox_y), namebox_with_text)
         
-        # 使用alpha_composite进行正确的alpha混合
-        target = Image.alpha_composite(target, overlay_layer)
-        
-        return target
+        return overlay_layer
 
-    def _draw_character_component(self, target, component, character_name=None, emotion_index=None, is_to_layer=False):
+    def _draw_character_component(self, component, character_name=None, emotion_index=None):
         """绘制角色组件 - 保留直接paste（角色图片通常已经处理好了透明度）"""
         # 检查是否启用
         if not component.get("enabled", True):
-            return target
+            return None
         
         # 确定使用的角色和表情
         if component.get("use_fixed_character", False):
@@ -286,7 +265,7 @@ class ManosabaCore:
             fixed_emotion_index = component.get("emotion_index", 1)
             
             if not fixed_character_name:
-                return target
+                return None
             
             draw_character_name = fixed_character_name
             draw_emotion_index = fixed_emotion_index
@@ -295,7 +274,7 @@ class ManosabaCore:
         else:
             # 使用主程序角色
             if character_name is None or emotion_index is None:
-                return target
+                return None
                 
             draw_character_name = character_name
             draw_emotion_index = emotion_index
@@ -305,7 +284,7 @@ class ManosabaCore:
         overlay = load_character_safe(draw_character_name, draw_emotion_index, component)
         
         # 计算粘贴位置
-        target_width, target_height = target.size
+        target_width, target_height = self._canvas_size
         overlay_width, overlay_height = overlay.size
         
         align = component.get("align", "bottom-left")
@@ -313,13 +292,7 @@ class ManosabaCore:
         offset_y = component.get("offset_y", 0)
         
         # 使用统一位置计算函数获取基本位置
-        paste_x, paste_y = calculate_component_position(
-            target_width, target_height,
-            overlay_width, overlay_height,
-            align,
-            offset_x,
-            offset_y
-        )
+        paste_x, paste_y = calculate_component_position(target_width, target_height,overlay_width, overlay_height,align,offset_x,offset_y)
         
         # 1. 角色整体偏移
         char_offset = character_config.get("offset", (0, 0))
@@ -330,18 +303,19 @@ class ManosabaCore:
         paste_y += character_config.get("offsetY", {}).get(emotion_str, 0) + char_offset[1]
         
         # 角色图片直接paste（因为角色图片通常已经处理好了透明度）
-        target.paste(overlay, (paste_x, paste_y), overlay)
-        return target
+        overlay_layer = Image.new("RGBA", self._canvas_size, (0, 0, 0, 0))
+        overlay_layer.paste(overlay, (paste_x, paste_y), overlay)
+        return overlay_layer
     
-    def _draw_extra_component(self, target, component):
+    def _draw_extra_component(self, component):
         """绘制额外组件 - 修复：统一使用alpha_composite进行alpha混合"""
         overlay_file = component.get("overlay", "")
         if not overlay_file:
-            return target
+            return None
         
         overlay_path = get_resource_path(os.path.join("assets", "shader", overlay_file))
         if not os.path.exists(overlay_path):
-            return target
+            return None
         
         extra_img = load_image_cached(overlay_path)
         
@@ -353,10 +327,10 @@ class ManosabaCore:
             original_width, original_height = extra_img.size
             new_width = int(original_width * scale)
             new_height = int(original_height * scale)
-            extra_img = extra_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            extra_img = extra_img.resize((new_width, new_height), Image.Resampling.BILINEAR)
         
         # 应用填充模式
-        canvas_width, canvas_height = target.size
+        canvas_width, canvas_height = self._canvas_size
         extra_img = apply_fill_mode(extra_img, canvas_width, canvas_height, fill_mode)
 
         # 使用统一位置计算函数
@@ -364,32 +338,24 @@ class ManosabaCore:
         offset_x = component.get("offset_x", 0)
         offset_y = component.get("offset_y", 0)
         
-        paste_x, paste_y = calculate_component_position(
-            canvas_width, canvas_height,
-            extra_img.width, extra_img.height,
-            align,
-            offset_x,
-            offset_y
-        )
+        paste_x, paste_y = calculate_component_position(canvas_width, canvas_height,extra_img.width, extra_img.height,align,offset_x,offset_y)
         
         # 创建透明图层并粘贴额外图片
-        overlay_layer = Image.new("RGBA", target.size, (0, 0, 0, 0))
+        overlay_layer = Image.new("RGBA", self._canvas_size, (0, 0, 0, 0))
         overlay_layer.paste(extra_img, (paste_x, paste_y), extra_img)
         
-        # 使用alpha_composite进行正确的alpha混合
-        target = Image.alpha_composite(target, overlay_layer)
-        return target
+        return overlay_layer
 
-    def _draw_text_component(self, target, component, character_name=None, emotion_index=None):
+    def _draw_text_component(self, component):
         """绘制文本组件 - 文本组件没有透明度问题，无需修改"""
         # 检查是否启用
         if not component.get("enabled", True):
-            return target
+            return None
         
         # 获取文本内容
         text_content = component.get("text", "")
         if not text_content:
-            return target
+            return None
         
         # 获取文本样式
         font_family = component.get("font_family", "font3")
@@ -406,13 +372,14 @@ class ManosabaCore:
         offset_y = component.get("offset_y", 0)
         
         # 创建绘制对象
+        target = Image.new("RGBA", self._canvas_size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(target)
         
         # 加载字体
         font = load_font_cached(font_family, font_size)
         
         # 计算文本位置
-        canvas_width, canvas_height = target.size
+        canvas_width, canvas_height = self._canvas_size
         
         # 简单的换行处理
         lines = []
@@ -444,13 +411,7 @@ class ManosabaCore:
             line_width = int(draw.textlength(line, font=font))
             
             # 计算单行位置
-            line_x, line_y = calculate_component_position(
-                canvas_width, canvas_height,
-                line_width, font_size,
-                align,
-                offset_x,
-                offset_y + i * line_height
-            )
+            line_x, line_y = calculate_component_position(canvas_width, canvas_height,line_width, font_size,align,offset_x,offset_y + i * line_height)
             
             # 绘制阴影
             draw.text((line_x + shadow_offset_x, line_y + shadow_offset_y),line,fill=shadow_color,font=font,anchor="la")
@@ -495,7 +456,7 @@ class ManosabaCore:
             text = config["text"]
             if not text:  # 跳过空文本
                 continue
-                
+
             font_color = tuple(config["font_color"])
             font_size = config["font_size"]
             
@@ -511,22 +472,10 @@ class ManosabaCore:
             shadow_y = baseline_y + 2
             
             # 绘制阴影文字
-            draw.text(
-                (shadow_x, shadow_y), 
-                text, 
-                fill=(0, 0, 0), 
-                font=font,
-                anchor="ls"
-            )
+            draw.text((shadow_x, shadow_y), text, fill=(0, 0, 0), font=font,anchor="ls")
 
             # 绘制主文字
-            draw.text(
-                (current_x, baseline_y), 
-                text, 
-                fill=font_color, 
-                font=font,
-                anchor="ls"
-            )
+            draw.text((current_x, baseline_y), text, fill=font_color, font=font,anchor="ls")
             
             # 更新下一个文字的起始位置
             current_x += text_width
@@ -609,19 +558,15 @@ class ManosabaCore:
         
         if not current_enabled:
             # 如果当前未启用，则启用并初始化
+            CONFIGS.gui_settings["sentiment_matching"]["enabled"] = True
+            CONFIGS.save_gui_settings()
             if not self.sentiment_analyzer_status['initialized']:
                 # 如果未初始化，则开始初始化
                 self.update_status("正在初始化情感分析器...")
-                if "sentiment_matching" not in CONFIGS.gui_settings:
-                    CONFIGS.gui_settings["sentiment_matching"] = {}
-                CONFIGS.gui_settings["sentiment_matching"]["enabled"] = True
-                CONFIGS.save_gui_settings()
                 self._initialize_sentiment_analyzer_async()
             else:
                 # 如果已初始化，直接启用
                 self.update_status("已启用情感匹配功能")
-                CONFIGS.gui_settings["sentiment_matching"]["enabled"] = True
-                CONFIGS.save_gui_settings()
                 self._notify_gui_status_change(True, True, False)
         else:
             # 如果当前已启用，则禁用
@@ -695,12 +640,8 @@ class ManosabaCore:
 
     def _get_emotion_by_sentiment(self, text: str) -> int:
         """根据文本情感获取对应的表情索引"""
-        if not text.strip():
+        if not (text.strip() and self.sentiment_analyzer_status['initialized']):
             return None
-        
-        if not self.sentiment_analyzer_status['initialized']:
-            return None
-    
         try:
             # 分析情感
             sentiment = self.sentiment_analyzer.analyze_sentiment(text)
@@ -740,7 +681,8 @@ class ManosabaCore:
 
     def switch_character(self, index: int) -> bool:
         """切换到指定索引的角色"""
-        self._cache_manager.clear_cache("character")  # 清理角色缓存
+        self._cache_manager.clear_cache("character")
+        self._cache_manager.clear_cache("layers")
         if 0 < index <= len(CONFIGS.character_list):
             CONFIGS.current_character_index = index
             CONFIGS.mahoshojo = CONFIGS.load_config("chara_meta")
@@ -850,12 +792,10 @@ class ManosabaCore:
 
         # 生成预览图片
         try:
-            self._current_base_image = self._generate_base_image_with_text(
-                character_name, background_index, emotion_index
-            )
+            self._current_base_image = self._generate_base_image_with_text(character_name, background_index, emotion_index)
         except:
             print("预览图生成出错")
-            self._current_base_image = Image.new("RGB", (400, 300), color="white")
+            self._current_base_image = Image.new("RGBA", (10, 10), color=(0, 0, 0, 0))
 
         # 用于 GUI 预览
         preview_image = self._current_base_image.copy()

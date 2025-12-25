@@ -945,7 +945,7 @@ class SettingsWindow:
             new_preload_bg = new_PS.get("preload_background", True)
                         
             # 更新CONFIGS
-            CONFIGS.gui_settings.update(new_settings)
+            CONFIGS.gui_settings |= new_settings
             
             # 保存到文件
             if CONFIGS.save_gui_settings():

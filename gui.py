@@ -77,7 +77,7 @@ class ManosabaGUI:
         
         # 延迟启动，确保GUI完全初始化
         self.root.after(200, process_callbacks)
-        
+
     def setup_gui(self):
         """设置 GUI 界面"""
         # 创建菜单栏
@@ -246,7 +246,7 @@ class ManosabaGUI:
         self.root.rowconfigure(1, weight=1)
         main_frame.rowconfigure(4, weight=1)
 
-        self.update_preview()
+        # self.update_preview()
         self.update_sentiment_filter_combo()
 
     def setup_menu(self):

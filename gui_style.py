@@ -1199,7 +1199,9 @@ class StyleWindow:
         style_name = self.style_var.get()
         
         # 清理所有缓存（包括背景、角色和组件缓存）
-        self._cache_manager.clear_cache("all")
+        self._cache_manager.clear_cache()
+        self._pending_preload_tasks["background"] = True
+        self._pending_preload_tasks["character"] = True
 
         # 加载新样式配置
         CONFIGS.apply_style(style_name)
@@ -1408,88 +1410,30 @@ class StyleWindow:
             messagebox.showerror("错误", f"数值格式错误: {str(e)}")
             return False
         
-        # 检查是否需要清除背景组件的缓存
-        new_bg_comp = background_components[0] if background_components else {}
-        ori_bg_comp = [comp for comp in CONFIGS.style.image_components if comp.get("type") == "background" and comp.get("enabled", True)]
-        for key in ["scale", "fill_mode", "offset_x", "offset_y"]:
-            if key in new_bg_comp:
-                if key in ori_bg_comp[0]:
-                    if ori_bg_comp[0][key] != new_bg_comp[key]:
-                        self._cache_manager.clear_cache("background")
-                        self._pending_preload_tasks["background"] = True
-                        break
-                else:
-                    self._cache_manager.clear_cache("background")
-                    self._pending_preload_tasks["background"] = True
-                    break
-
-        # 检查是否需要清除角色组件的缓存
-        new_chara_comps = [comp for comp in image_components if comp.get("type") == "character" and comp.get("enabled", True)]
-        ori_chara_comps = [comp for comp in CONFIGS.style.image_components if comp.get("type") == "character" and comp.get("enabled", True)]
         # 按layer值排序
-        new_chara_comps.sort(key=lambda x: x.get("layer", 0))
-        ori_chara_comps.sort(key=lambda x: x.get("layer", 0))
-        # 检查是否有变化
-        if len(new_chara_comps) != len(ori_chara_comps):
-            self._cache_manager.clear_cache("character")
-            self._pending_preload_tasks["character"] = True
-        else:
-            for new_comp, ori_comp in zip(new_chara_comps, ori_chara_comps):
-                if (new_comp.get("scale") != ori_comp.get("scale") or 
-                    new_comp.get("use_fixed_character") != ori_comp.get("use_fixed_character")):
-                    self._cache_manager.clear_cache("character")
-                    self._pending_preload_tasks["character"] = True
-                    break
-        
-        # 检查除角色和背景以外的其他组件是否有变化
-        # 过滤出除角色和背景以外的组件
-        def is_non_bg_chara_component(comp):
-            comp_type = comp.get("type")
-            return comp_type not in ["background", "character"]
-        
-        new_other_comps = [comp for comp in image_components if is_non_bg_chara_component(comp)]
-        ori_other_comps = [comp for comp in CONFIGS.style.image_components if is_non_bg_chara_component(comp)]
-        
-        # 按layer值排序以便比较
-        new_other_comps.sort(key=lambda x: x.get("layer", 0))
-        ori_other_comps.sort(key=lambda x: x.get("layer", 0))
-        
-        # 检查是否有变化
-        layers_changed = False
-        if len(new_other_comps) != len(ori_other_comps):
-            layers_changed = True
-        else:
-            for new_comp, ori_comp in zip(new_other_comps, ori_other_comps):
-                # 检查关键属性是否发生变化
-                if new_comp.get("type") != ori_comp.get("type"):
-                    layers_changed = True
-                    break
-                if new_comp.get("enabled", True) != ori_comp.get("enabled", True):
-                    layers_changed = True
-                    break
-                if new_comp.get("overlay", "") != ori_comp.get("overlay", ""):
-                    layers_changed = True
-                    break
-                if new_comp.get("align", "top-left") != ori_comp.get("align", "top-left"):
-                    layers_changed = True
-                    break
-                if new_comp.get("offset_x", 0) != ori_comp.get("offset_x", 0):
-                    layers_changed = True
-                    break
-                if new_comp.get("offset_y", 0) != ori_comp.get("offset_y", 0):
-                    layers_changed = True
-                    break
-                if new_comp.get("scale", 1.0) != ori_comp.get("scale", 1.0):
-                    layers_changed = True
-                    break
-                if new_comp.get("fill_mode", "fit") != ori_comp.get("fill_mode", "fit"):
-                    layers_changed = True
-                    break
-        
-        # 清理组件缓存
-        if layers_changed:
-            print("清理组件缓存")
-            self._cache_manager.clear_cache("layers")
+        new_comps = image_components
+        ori_comps = CONFIGS.style.image_components
+        ori_comps.sort(key=lambda x: x.get("layer", 0))
+
+        pass_check = False
+        for new_comp, ori_comp in zip(new_comps, ori_comps):
+            if new_comp != ori_comp:
+                if new_comp.get("type") in ["character", "background"]:
+                    if new_comp.get("use_fixed_character") or new_comp.get("use_fixed_background"):
+                        self._cache_manager.clear_cache()
+                        self._pending_preload_tasks["background"] = True
+                        self._pending_preload_tasks["character"] = True
+                        break
+                    else:
+                        if new_comp.keys()^ori_comp.keys() == {"overlay"}:
+                            continue
+                    self._cache_manager.clear_cache(new_comp.get("type"))
+                    self._pending_preload_tasks[new_comp.get("type")] = True
+                    continue
+                elif not pass_check and new_comp.get("type"):
+                    pass_check = True
+                    self._cache_manager.clear_cache("layers")
+                    continue
         
         # 更新样式配置
         success = CONFIGS.update_style(style_name, style_data)

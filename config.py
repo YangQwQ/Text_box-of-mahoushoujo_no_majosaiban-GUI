@@ -84,13 +84,18 @@ class ConfigLoader:
         self.version = self.version_info["version"] # 需要存在version.yml文件
 
         # 配置加载
-        self.mahoshojo = {}
-        self.text_configs_dict = {}
-        self.character_list = []
-        self.current_character = {}
-        self.keymap = {}
-        self.process_whitelist = []
-        self._load_configs()
+        self.mahoshojo = self.load_config("chara_meta")
+        self.text_configs_dict = self.load_config("text_configs")
+        self.character_list = list(self.mahoshojo.keys())
+        self.current_character = self.mahoshojo[self.character_list[self.current_character_index - 1]]
+        self.keymap = self.load_config("keymap")
+        self.process_whitelist = self.load_config("process_whitelist")
+        self.gui_settings = self.load_config("settings")
+
+        # 确保enabled只有在display为True时才可能为True
+        sm = self.gui_settings["sentiment_matching"]
+        sm["enabled"] &= sm["display"]
+        self.ai_models = self.gui_settings.get("sentiment_matching", {}).get("model_configs", {})
 
         self.background_count = self._get_background_count()  # 背景图片数量
         
@@ -172,25 +177,6 @@ class ConfigLoader:
         except Exception as e:
             print(f"获取背景数量失败: {e}")
             return 0
-            
-    def _load_configs(self):
-        """加载所有配置"""
-        self.mahoshojo = self.load_config("chara_meta")
-        self.character_list = list(self.mahoshojo.keys())
-        self.current_character = self.mahoshojo[self.character_list[self.current_character_index - 1]]
-
-        self.text_configs_dict = self.load_config("text_configs")
-        self.keymap = self.load_config("keymap")
-        self.process_whitelist = self.load_config("process_whitelist")
-
-        self.gui_settings = self.load_config("settings")
-        
-        # 直接从配置中获取ai_models，不需要额外处理
-        self.ai_models = self.gui_settings.get("sentiment_matching", {}).get("model_configs", {})
-        
-        # 确保enabled只有在display为True时才可能为True
-        sm = self.gui_settings["sentiment_matching"]
-        sm["enabled"] &= sm["display"]
     
     def reload_configs(self):
         """重新加载配置（用于热键更新后）"""
@@ -220,15 +206,6 @@ class ConfigLoader:
         # 加载配置文件
         config = self._load_yaml_file(f"{config_type}.yml")
         
-        if config_type == "text_configs":
-            # 对于text_configs，我们需要转换格式
-            # 从旧格式（带position）转换为新格式（不带position）
-            if config:
-                # 如果配置是旧格式（带position），转换为新格式
-                config = self._convert_text_configs_format(config)
-            else:
-                config = {}
-        
         if config_type in ["keymap", "process_whitelist"]:
             # 处理平台特定配置
             if config:
@@ -240,42 +217,14 @@ class ConfigLoader:
             default_settings = self._get_default_setting("settings")
             if config:
                 # 递归合并默认值和文件配置
-                config = self._merge_dicts(default_settings, config)
+                default_settings |= config
+                config = default_settings
             else:
                 config = default_settings
                 self.gui_settings = config
                 self.save_gui_settings()
         
         return config
-    
-    def _convert_text_configs_format(self, old_config: Dict[str, Any]) -> Dict[str, Any]:
-        """转换text_configs格式，移除position参数"""
-        new_config = {}
-        
-        for character_name, text_list in old_config.items():
-            new_text_list = []
-            for text_item in text_list:
-                # 只保留text, font_color, font_size，移除position
-                new_text_item = {
-                    "text": text_item.get("text", ""),
-                    "font_color": text_item.get("font_color", [255, 255, 255]),
-                    "font_size": text_item.get("font_size", 92)
-                }
-                new_text_list.append(new_text_item)
-            
-            new_config[character_name] = new_text_list
-        
-        return new_config
-    
-    def _merge_dicts(self, default: Dict, override: Dict) -> Dict:
-        """递归合并两个字典"""
-        result = default.copy()
-        for key, value in override.items():
-            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-                result[key] = self._merge_dicts(result[key], value)
-            else:
-                result[key] = value
-        return result
     
     def _get_default_setting(self, config_type: str) -> Dict[str, Any]:
         """获取默认设置"""
@@ -444,7 +393,7 @@ class ConfigLoader:
         # 合并新的快捷键设置到当前平台
         if self.platform not in keymap_data:
             keymap_data[self.platform] = {}
-        keymap_data[self.platform].update(new_hotkeys)
+        keymap_data[self.platform] |= new_hotkeys
 
         # 保存回文件
         return self._save_yaml_file("keymap.yml", keymap_data)
@@ -468,37 +417,17 @@ class ConfigLoader:
     def save_gui_settings(self):
         """保存GUI设置到settings.yml（仅更新变化的部分）"""
         # 加载现有配置
-        filepath = get_resource_path(os.path.join("config", "settings.yml"))
-        
-        if os.path.exists(filepath):
-            with open(filepath, 'r', encoding='utf-8') as f:
-                existing_data = yaml.safe_load(f) or {}
-        else:
-            existing_data = {}
+        existing_data = self._load_yaml_file("settings.yml") or {}
         
         # 没有变化就返回个False
         if json.dumps(existing_data, sort_keys=True) == json.dumps(self.gui_settings, sort_keys=True):
             return False
         
-        # 递归合并新设置到现有数据中
-        self._merge_dicts_partial(existing_data, self.gui_settings)
+        # 新设置到现有数据中
+        existing_data |= self.gui_settings
         
         # 保存回文件
-        ensure_path_exists(filepath)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            yaml.dump(existing_data, f, allow_unicode=True, default_flow_style=False)
-        
-        return True
-        
-    def _merge_dicts_partial(self, target: Dict, source: Dict):
-        """部分合并字典，只更新有变化的部分"""
-        for key, value in source.items():
-            if key in target and isinstance(target[key], dict) and isinstance(value, dict):
-                # 递归合并子字典
-                self._merge_dicts_partial(target[key], value)
-            else:
-                # 直接赋值（覆盖或新增）
-                target[key] = value
+        return self._save_yaml_file("settings.yml", existing_data)
 
     def save_style_configs(self):
         """保存样式配置到文件"""

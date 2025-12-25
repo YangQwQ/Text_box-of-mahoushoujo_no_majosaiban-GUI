@@ -28,8 +28,6 @@ class PreviewManager:
         self._fit_to_window_enabled = True
 
         self.zoom_level = 1.0
-        self.min_zoom = 0.1
-        self.max_zoom = 3.0
 
     def setup_preview_frame(self, parent):
         """设置预览框架 - 支持滚动和缩放"""
@@ -202,38 +200,6 @@ class PreviewManager:
             if new_height > 0:
                 self.canvas.yview_moveto(max(0, min(new_y / new_height, 1)))
 
-    def _start_pan(self, event):
-        """开始拖拽"""
-        self.is_panning = True
-        self.pan_start_x = event.x
-        self.pan_start_y = event.y
-        self.canvas.config(cursor="fleur")
-        return "break"
-
-    def _on_pan(self, event):
-        """处理拖拽"""
-        if not self.is_panning:
-            return
-            
-        # 计算移动距离
-        delta_x = event.x - self.pan_start_x
-        delta_y = event.y - self.pan_start_y
-        
-        # 移动Canvas视图
-        self.canvas.xview_scroll(-delta_x, "pixels")
-        self.canvas.yview_scroll(-delta_y, "pixels")
-        
-        # 更新起始位置
-        self.pan_start_x = event.x
-        self.pan_start_y = event.y
-        return "break"
-
-    def _stop_pan(self, event):
-        """停止拖拽"""
-        self.is_panning = False
-        self.canvas.config(cursor="")
-        return "break"
-
     def _update_displayed_image(self):
         """更新显示的图片"""
         if not self.displayed_image:
@@ -268,7 +234,7 @@ class PreviewManager:
         fit_ratio = min(width_ratio, height_ratio)
         
         # 设置缩放级别
-        self.zoom_level = max(self.min_zoom, min(fit_ratio, self.max_zoom))
+        self.zoom_level = max(0.1, min(fit_ratio, 3))
         
         # 应用缩放
         self._apply_zoom(self.zoom_level)

@@ -38,10 +38,6 @@ class UnifiedImageCacheManager:
             self._cached_layers_sequence.clear()
             print("图层序列缓存已清理")
         
-        if cache_type in ("font", "all"):
-            self._font_cache.clear()
-            print("字体缓存已清理")
-    
     # 背景缓存相关方法
     def get_background(self, cache_key: str):
         """获取背景缓存"""
@@ -439,8 +435,8 @@ class PreloadManager:
     def _preload_character_image(self, character_name: str, emotion_index: int, component: dict):
         """预加载单个角色图片并进行预处理"""
         # 创建缓存键
-        cache_key = self._create_character_cache_key(character_name, emotion_index, component)
-        
+        cache_key = f"{character_name}_{emotion_index}_{component.get('scale', 1.0)}"
+
         # 检查统一缓存
         cached_character = self._unified_cache.get_character(cache_key)
         if cached_character is not None:
@@ -477,21 +473,6 @@ class PreloadManager:
             default_img = Image.new("RGBA", (800, 600), (0, 0, 0, 0))
             self._unified_cache.set_character(cache_key, default_img)
             return default_img
-    
-    def _create_character_cache_key(self, character_name: str, emotion_index: int, component: dict) -> str:
-        """创建角色缓存键"""
-        # 获取角色配置中的缩放
-        character_config = CONFIGS.mahoshojo.get(character_name, {})
-        character_scale = character_config.get("scale", 1.0)
-        
-        # 获取组件缩放
-        component_scale = component.get("scale", 1.0)
-        
-        # 计算总缩放
-        total_scale = character_scale * component_scale
-        
-        # 无论是否固定角色，都使用相同的缓存键格式
-        return f"character_{character_name}_{emotion_index}_{total_scale}"
         
     def _preload_background_task(self):
         """预加载所有背景图片"""
@@ -508,6 +489,9 @@ class PreloadManager:
                         for file_index in range(total_to_process):
                             if self._should_interrupt():
                                 self.update_status("背景图片预加载被中断")
+                                return
+                            if components != CONFIGS.style_configs.get(CONFIGS.gui_settings.get("last_style","default"), {}).get("image_components",{}):
+                                self.update_status("背景图片预加载中断")
                                 return
                             component["overlay"] = f"c{file_index + 1}"
                             load_background_component_safe(component)
@@ -673,7 +657,6 @@ def load_background_component_safe(component: dict) -> Image.Image:
     offset_y = component.get("offset_y", 0)
     
     cache_key = f"bg_component_{overlay_file}_{canvas_width}_{canvas_height}"
-    
     cache_manager = get_unified_cache_manager()
     
     # 检查缓存
@@ -785,7 +768,7 @@ def load_character_safe(character_name: str, emotion_index: int, component: dict
     
     # 创建缓存键
     preload_manager = get_preload_manager()
-    cache_key = preload_manager._create_character_cache_key(character_name, emotion_index, component)
+    cache_key = f"{character_name}_{emotion_index}_{component.get('scale', 1.0)}"
     
     cache_manager = get_unified_cache_manager()
     

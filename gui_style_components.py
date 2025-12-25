@@ -915,7 +915,6 @@ class ComponentEditor:
                 if not config.get("use_fixed_background", False):
                     continue
             final_config[key] = value
-        
         return final_config
     
     def _on_enabled_changed(self, enabled_var):
