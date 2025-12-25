@@ -35,7 +35,7 @@ core_files = [
     'gui_hotkeys.py',
     'gui_settings.py',
     'path_utils.py',
-    'load_utils.py',
+    'image_loader.py',
     'draw_utils.py'
 ]
 
@@ -48,43 +48,6 @@ for file in core_files:
 try:
     certifi_data = collect_data_files('certifi')
     datas.extend(certifi_data)
-except:
-    pass
-
-# 隐藏导入的模块 - 只包含必要的模块
-hiddenimports = [
-    # PIL相关
-    'PIL._tkinter_finder',
-    'PIL._imaging',
-    'PIL.Image',
-    'PIL.ImageTk',
-    'PIL.ImageOps',
-    'PIL.ImageDraw',
-    'PIL.ImageFont',
-    
-    # GUI相关
-    'tkinter',
-    'tkinter.ttk',
-    
-    # 网络请求
-    'openai',
-    
-    # Windows API
-    'win32clipboard',
-    'win32gui',
-    'win32process',
-    'win32api',
-    
-    # 键盘和输入
-    'pynput',
-    
-    # 系统工具
-    'psutil',
-]
-
-# 尝试收集一些可能被动态导入的模块
-try:
-    hiddenimports.extend(collect_submodules('pynput'))
 except:
     pass
 
@@ -117,9 +80,16 @@ excludes = [
 a = Analysis(
     ['main.py'],
     pathex=[os.getcwd()],
-    binaries=[],
+    binaries=[
+        ('image_loader.dll', '.'),
+        ('SDL2_image.dll', '.'),
+        ('SDL2_ttf.dll', '.'),
+        ('SDL2.dll', '.'),
+        ('libwebpdemux-2.dll', '.'),
+        ('libwebp-7.dll', '.'),
+    ],
     datas=datas,
-    hiddenimports=hiddenimports,
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

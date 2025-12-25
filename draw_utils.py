@@ -1,559 +1,120 @@
 # filename: draw_utils.py
 from io import BytesIO
-from typing import Tuple, Union, Literal, Optional
-from PIL import Image, ImageDraw, ImageFont
-import os
-import time
+from typing import Tuple, Union, Literal, Optional, List, Any, Dict
+from PIL import Image
 import emoji
 
-from load_utils import load_font_cached
-from path_utils import get_resource_path
 from config import CONFIGS
 
-# 类型别名定义
-Align = Literal["left", "center", "right"]
-VAlign = Literal["top", "middle", "bottom"]
 
-# 保留括号定义
-bracket_pairs = {
-    "[": "]",
-    "【": "】",
-    "〔": "〕",
-    "‘": "’",
-    "「": "」",
-    "｢": "｣",
-    "『": "』",
-    "〖": "〗",
-    "<": ">",
-    "《": "》",
-    "〈": "〉",
-    "「": "」",
-    "｢": "｣",
-    "『": "』",
-    "〖": "〗",
-    "<": ">",
-    "《": "》",
-    "〈": "〉",
-    "“": "”",
-    '"': '"',
-}
+# --- 辅助函数：提取emoji并替换为占位符 ---
+def _extract_emojis_and_replace(src: str):
+    emoji_infos = emoji.emoji_list(
+        src
+    )  # 返回列表，每个元素包含 'emoji', 'match_start', 'match_end'
+    if not emoji_infos:
+        return [], []
+
+    emojis = []
+    positions = []  # 记录字节位置
+
+    # 用于将字符索引转换为字节索引的辅助函数
+    def char_index_to_byte_index(char_index):
+        # 将前char_index个字符编码为UTF-8，然后返回字节数
+        return len(src[:char_index].encode("utf-8"))
+
+    for info in emoji_infos:
+        s = info["match_start"]  # 字符索引
+        e = info["match_end"]
+        # 转换为字节索引
+        s_byte = char_index_to_byte_index(s)
+        e_byte = char_index_to_byte_index(e)
+        emojis.append(src[s:e])
+        positions.append((s_byte, e_byte))  # 记录字节位置元组
+    return emojis, positions  # 返回三个值
+
 
 def draw_content_auto(
-    image_source: Union[str, Image.Image],
-    text: Optional[str] = None,
-    content_image: Optional[Image.Image] = None,
-    fill_mode: str = "fit",
-    image_align: Align = "center",
-    image_valign: VAlign = "middle",
-    line_spacing: float = 0.15,
-    image_padding: int = 12,
-    min_image_ratio: float = 0.2,
-    text_rect: Optional[Tuple[int, int, int, int]] = None,  # 文本区域 (x1, y1, x2, y2)
-    image_rect: Optional[Tuple[int, int, int, int]] = None,  # 图片区域 (x1, y1, x2, y2)
-    image_paste_mode: str = "off"  # off, always, mixed
+    text: Optional[str] = None, content_image: Optional[Image.Image] = None
 ) -> bytes:
+    """简化的绘制函数，只处理emoji提取，其他交给C++"""
 
-    PLACEHOLDER_CHAR = "□"  # 用来占位 emoji 的字符
-    EMOJI_FALLBACK_CHAR = "□"  # emoji 加载失败时使用的替代字符
+    import time
 
-    # 使用样式配置中的默认值
+    st = time.time()
 
-    max_font_height = CONFIGS.style.font_size
-    
-    # 从十六进制颜色转换为RGB
-    def hex_to_rgb(hex_color: str) -> tuple:
-        hex_color = hex_color.lstrip('#')
-        if len(hex_color) == 3:
-            hex_color = ''.join([c*2 for c in hex_color])
-        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    
-    color = hex_to_rgb(CONFIGS.style.text_color)
-    
-    # 获取阴影颜色
-    shadow_color = hex_to_rgb(CONFIGS.style.shadow_color)
-    shadow_offset_x = CONFIGS.style.shadow_offset_x
-    shadow_offset_y = CONFIGS.style.shadow_offset_y
-    
-    # 获取强调色
-    character_name = CONFIGS.get_character()
-    bracket_color_hex = CONFIGS.style.get_bracket_color(character_name)
-    bracket_color = hex_to_rgb(bracket_color_hex)
-    
-    # 获取字体名称
-    font_name = CONFIGS.style.font_family
+    # 提取emoji
+    emoji_list = []
+    if text:
+        emoji_list, emoji_position = _extract_emojis_and_replace(text)
 
-    # 字体加载函数
-    def load_font(size: int) -> ImageFont.FreeTypeFont:
-        return load_font_cached(font_name, size)
+    print(f"Emoji提取用时: {int((time.time()-st)*1000)}ms")
+    st = time.time()
 
-    # --- 辅助函数：提取emoji并替换为占位符 ---
-    def extract_emojis_and_replace(src: str, placeholder: str = PLACEHOLDER_CHAR):
-        emoji_infos = emoji.emoji_list(src)
-        if not emoji_infos:
-            return src, []
-        out_chars = []
-        emojis = []
-        last = 0
-        for info in emoji_infos:
-            s = info['match_start']
-            e = info['match_end']
-            if s > last:
-                out_chars.append(src[last:s])
-            out_chars.append(placeholder)
-            emojis.append(src[s:e])
-            last = e
-        if last < len(src):
-            out_chars.append(src[last:])
-        placeholder_text = "".join(out_chars)
-        return placeholder_text, emojis
+    # 准备图片数据
+    image_data = None
+    image_width = 0
+    image_height = 0
+    image_pitch = 0
 
-    def get_emoji_filename(seq: str) -> str:
-        return "emoji_u" + "_".join(f"{ord(c):x}" for c in seq) + ".png"
+    if content_image:
+        # 将图片转换为RGBA格式
+        img_rgba = content_image.convert("RGBA")
+        import numpy as np
 
-    def load_emoji_image(emoji_char_or_seq: str, emoji_size: int) -> Optional[Image.Image]:
-        try:
-            filename = get_emoji_filename(emoji_char_or_seq)
-            emoji_path = get_resource_path(os.path.join("assets", "emoji", filename))
+        img_array = np.array(img_rgba)
+        image_height, image_width = img_array.shape[:2]
+        image_pitch = image_width * 4
+        image_data = img_array.flatten().tobytes()
 
-            if not os.path.exists(emoji_path):
-                base_char = emoji_char_or_seq[0]
-                base_filename = get_emoji_filename(base_char)
-                base_path = get_resource_path(os.path.join("assets", "emoji", base_filename))
+    # 调用C++端的简化函数
+    try:
+        from image_loader import draw_content_simple_dll
 
-                if not os.path.exists(base_path):
-                    print(f"[load_emoji_image] emoji asset not found: {emoji_path} nor {base_path}")
-                    return None
+        result_image = draw_content_simple_dll(
+            text=text or "",
+            emoji_list=emoji_list,
+            emoji_position=emoji_position,
+            image_data=image_data,
+            image_width=image_width,
+            image_height=image_height,
+            image_pitch=image_pitch,
+        )
 
-                emoji_img = Image.open(base_path).convert("RGBA")
-            else:
-                emoji_img = Image.open(emoji_path).convert("RGBA")
+        print(f"C++ drawing time: {int((time.time()-st)*1000)}ms")
+        st = time.time()
 
-            if emoji_img.width != emoji_size or emoji_img.height != emoji_size:
-                emoji_img = emoji_img.resize((emoji_size, emoji_size), Image.Resampling.BILINEAR)
+        if not result_image:
+            raise Exception("C++ drawing failed")
 
-            return emoji_img
-        except Exception as e:
-            print(f"[load_emoji_image] 加载emoji图片失败 {emoji_char_or_seq}: {e}")
-            return None
+        # 图片压缩（可选）
+        compression_setting = CONFIGS.gui_settings.get("image_compression", None)
+        if compression_setting and compression_setting.get(
+            "pixel_reduction_enabled", False
+        ):
+            reduction_ratio = (
+                compression_setting.get("pixel_reduction_ratio", 50) / 100.0
+            )
+            new_width = max(int(result_image.width * (1 - reduction_ratio)), 300)
+            new_height = max(int(result_image.height * (1 - reduction_ratio)), 100)
+            result_image = result_image.resize(
+                (new_width, new_height), Image.Resampling.BILINEAR
+            )
+            print(f"压缩耗时: {int((time.time()-st)*1000)}ms")
+            st = time.time()
 
-    def draw_text_or_emoji(
-        draw: ImageDraw.Draw,
-        x: int,
-        y: int,
-        text: str,
-        # font: ImageFont.FreeTypeFont,
-        color: Tuple[int, int, int],
-        emoji_size: Optional[int] = None,
-    ) -> int:
-        if emoji_size is not None:
-            emoji_img = load_emoji_image(text, emoji_size)
-            if emoji_img is None:
-                try:
-                    draw.text((x + shadow_offset_x, y + shadow_offset_y), EMOJI_FALLBACK_CHAR, font=font, fill=shadow_color)
-                    draw.text((x, y), EMOJI_FALLBACK_CHAR, font=font, fill=color)
-                    w = int(draw.textlength(EMOJI_FALLBACK_CHAR, font=font))
-                    print(f"[draw_text_or_emoji] emoji 加载失败，使用替代字符绘制: {text}")
-                    return w
-                except Exception as e:
-                    print(f"[draw_text_or_emoji] emoji 绘制失败且替代字符绘制也失败: {text} -> {e}")
-                    return 0
+        # 转换为BMP格式
+        buf = BytesIO()
+        img_rgb = result_image.convert("RGB")
+        img_rgb.save(buf, format="BMP")
+        bmp_data = buf.getvalue()[14:]
 
-            try:
-                ascent, _ = font.getmetrics()
-                emoji_y = y + ascent - emoji_size + int(emoji_size * 0.1)
-                img = draw._image
-                font_size_ratio = emoji_size / 90 if 90 != 0 else 1
-                dynamic_offset = int(emoji_size * 0.1 * font_size_ratio)
-                paste_y = emoji_y + dynamic_offset
-                img.paste(emoji_img, (x, paste_y), emoji_img)
-                return emoji_img.width
-            except Exception as e:
-                print(f"[draw_text_or_emoji] emoji paste 失败 {text}: {e}")
-                try:
-                    draw.text((x + shadow_offset_x, y + shadow_offset_y), EMOJI_FALLBACK_CHAR, font=font, fill=shadow_color)
-                    draw.text((x, y), EMOJI_FALLBACK_CHAR, font=font, fill=color)
-                    w = int(draw.textlength(EMOJI_FALLBACK_CHAR, font=font))
-                    return w
-                except Exception as e2:
-                    print(f"[draw_text_or_emoji] 替代字符绘制也失败: {e2}")
-                    return 0
-        else:
-            draw.text((x + shadow_offset_x, y + shadow_offset_y), text, font=font, fill=shadow_color)
-            draw.text((x, y), text, font=font, fill=color)
-            return int(draw.textlength(text, font=font))
+        print(f"输出耗时: {int((time.time()-st)*1000)}ms")
+        return bmp_data
 
-    def wrap_lines_with_measure(txt: str, font: ImageFont.FreeTypeFont, max_w: int):
-        lines: list[str] = []
-        ascent, descent = font.getmetrics()
-        line_h = int((ascent + descent) * (1 + line_spacing))
+    except Exception as e:
+        print(f"绘制失败: {str(e)}")
+        import traceback
 
-        max_line_w = 0
-        
-        measure_cache = {}
-        def measure(s: str) -> float:
-            if s not in measure_cache:
-                measure_cache[s] = draw.textlength(s, font=font)
-            return measure_cache[s]
-        
-        for para in txt.splitlines() or [""]:
-            has_space = " " in para
-            units = para.split(" ") if has_space else list(para)
-            buf = ""
-
-            def unit_join(a: str, b: str) -> str:
-                if not a:
-                    return b
-                return f"{a} {b}" if has_space else f"{a}{b}"
-
-            i = 0
-            units_len = len(units)
-
-            while i < units_len:
-                trial = unit_join(buf, units[i])
-                w = measure(trial)
-
-                if w <= max_w:
-                    buf = trial
-                    i += 1
-                else:
-                    if buf:
-                        lines.append(buf)
-                        max_line_w = max(max_line_w, measure(buf))
-                        buf = ""
-                    else:
-                        if has_space and len(units[i]) > 1:
-                            word = units[i]
-                            left, right = 1, len(word)
-
-                            while left <= right:
-                                mid = (left + right) // 2
-                                prefix = word[:mid]
-                                if measure(prefix) <= max_w:
-                                    left = mid + 1
-                                else:
-                                    right = mid - 1
-
-                            if right > 0:
-                                part = word[:right]
-                                lines.append(part)
-                                max_line_w = max(max_line_w, measure(part))
-                                units[i] = word[right:]
-                            else:
-                                lines.append(word)
-                                max_line_w = max(max_line_w, measure(word))
-                                i += 1
-                        else:
-                            u = units[i]
-                            u_w = measure(u)
-                            if u_w <= max_w:
-                                buf = u
-                            else:
-                                lines.append(u)
-                                max_line_w = max(max_line_w, u_w)
-                            i += 1
-
-            if buf:
-                lines.append(buf)
-                max_line_w = max(max_line_w, measure(buf))
-
-            if para == "" and (not lines or lines[-1] != ""):
-                lines.append("")
-
-        total_h = max(line_h * max(1, len(lines)), 1)
-        return lines, int(max_line_w), total_h, line_h
-
-    # --- 主函数逻辑开始 ---
-    st=time.time()
-
-    if isinstance(image_source, Image.Image):
-        img = image_source
-    else:
-        img = Image.open(image_source).convert("RGBA")
-
-    draw = ImageDraw.Draw(img)
-
-    # 确定最终使用的文本区域和图片区域
-    final_text_rect = text_rect
-    final_image_rect = image_rect
-    
-    # 是否有图片和文字
-    has_text = text is not None and text.strip() != ""    
-    has_image = content_image is not None
-
-    if image_paste_mode == "mixed":
-        # mixed模式：根据内容类型决定
-        if not (has_text and has_image):
-            final_image_rect = text_rect
-            
-    else:  # off 模式
-        final_image_rect = text_rect
-
-        if has_image and has_text:
-            # 混合内容：在文本框内动态划分
-            x1, y1, x2, y2 = text_rect
-            
-            if not (x2 > x1 and y2 > y1):
-                raise ValueError("无效的区域。")
-
-            region_w= x2 - x1
-            
-            # 提取emoji并替换为占位符
-            placeholder_text, emoji_list = extract_emojis_and_replace(text, PLACEHOLDER_CHAR)
-            text_length = len(placeholder_text)
-            
-            # 获取图片尺寸和特征
-            cw, ch = content_image.size
-            image_aspect = cw / ch if ch > 0 else 1
-            
-            # 根据图片宽高比决定基础比例
-            if image_aspect > 2:
-                # 宽幅图片：需要更多宽度
-                base_image_ratio = 0.6
-            elif image_aspect > 1:
-                # 横版图片
-                base_image_ratio = 0.5
-            else:
-                # 竖版或方形图片
-                base_image_ratio = 0.4
-            
-            # 根据文本长度调整
-            if text_length <= 10:
-                # 短文本：加大图片比例
-                image_ratio = min(base_image_ratio + 0.2, 0.7)
-            elif text_length <= 30:
-                # 中等文本：保持基础比例
-                image_ratio = base_image_ratio
-            else:
-                # 长文本：减小图片比例
-                image_ratio = max(base_image_ratio - 0.1, min_image_ratio)
-            
-            # 确保图片比例在合理范围内
-            image_ratio = max(min(image_ratio, 0.7), min_image_ratio)
-            
-            # 计算具体宽度
-            image_region_w = int(region_w * image_ratio)
-            text_region_w = region_w - image_region_w
-            
-            # 设置矩形区域
-            final_text_rect = (x1, y1, x1 + text_region_w, y2)
-            final_image_rect = (x1 + text_region_w, y1, x2, y2)
-
-    print(f"分区耗时: {int((time.time() - st)*1000)}")
-    st=time.time()
-
-    # --- 处理图片部分 ---
-    if has_image:
-        ix1, iy1, ix2, iy2 = final_image_rect
-        region_w_img = max(1, (ix2 - ix1) - 2 * image_padding)
-        region_h_img = max(1, (iy2 - iy1) - 2 * image_padding)
-
-        cw, ch = content_image.size
-        if cw <= 0 or ch <= 0:
-            raise ValueError("content_image 尺寸无效。")
-
-        # 根据填充模式计算缩放比例
-        scale_w = region_w_img / cw
-        scale_h = region_h_img / ch
-        
-        if fill_mode == "width":
-            # 宽度匹配：根据宽度缩放，高度可能超出
-            scale = scale_w
-        elif fill_mode == "height":
-            # 高度匹配：根据高度缩放，宽度可能超出
-            scale = scale_h
-        else:
-            # 适应图片框：保持宽高比，不超出区域
-            scale = min(scale_w, scale_h)
-
-        new_w = max(1, int(round(cw * scale)))
-        new_h = max(1, int(round(ch * scale)))
-
-        resized = content_image.resize((new_w, new_h), Image.Resampling.BILINEAR)
-
-        if image_align == "left":
-            px = ix1 + image_padding
-        elif image_align == "center":
-            px = ix1 + image_padding + (region_w_img - new_w) // 2
-        else:  # "right"
-            px = ix2 - image_padding - new_w
-
-        if image_valign == "top":
-            py = iy1 + image_padding
-        elif image_valign == "middle":
-            py = iy1 + image_padding + (region_h_img - new_h) // 2
-        else:  # "bottom"
-            py = iy2 - image_padding - new_h
-
-        if "A" in resized.getbands():
-            img.paste(resized, (px, py), resized)
-        else:
-            img.paste(resized, (px, py))
-        print(f"图片耗时: {int((time.time() - st)*1000)}")
-        st=time.time()
-        
-    # --- 处理文字部分 ---
-    if has_text:
-        tx1, ty1, tx2, ty2 = final_text_rect
-        region_w_text, region_h_text = tx2 - tx1, ty2 - ty1
-
-        # 提取emoji并替换为占位符
-        placeholder_text, emoji_list = extract_emojis_and_replace(text, PLACEHOLDER_CHAR)
-        print(f"emoji分析耗时: {int((time.time() - st)*1000)}")
-        st=time.time()
-        
-        # 搜索最大字号
-        hi = min(region_h_text, max_font_height) if max_font_height else region_h_text
-        lo, best_size, best_lines, best_line_h, best_block_h = 1, 0, [], 0, 0
-
-        while lo <= hi:
-            mid = (lo + hi) // 2
-            font = load_font(mid)
-            lines, w, h, lh = wrap_lines_with_measure(placeholder_text, font, region_w_text)
-
-            if w <= region_w_text and h <= region_h_text:
-                best_size, best_lines, best_line_h, best_block_h = mid, lines, lh, h
-                lo = mid + 1
-            else:
-                hi = mid - 1
-
-        if best_size == 0:
-            font = load_font(1)
-            lines, _, h, lh = wrap_lines_with_measure(placeholder_text, font, region_w_text)
-            best_lines, best_block_h, best_line_h = lines, h, lh
-            best_size = 1
-        else:
-            font = load_font(best_size)
-            _, _, best_block_h, best_line_h = wrap_lines_with_measure(placeholder_text, font, region_w_text)
-        print(f"字号搜索耗时: {int((time.time() - st)*1000)}")
-        st=time.time()
-        
-        # 计算emoji尺寸
-        emoji_size = best_size
-
-        text_valign = CONFIGS.style.text_valign
-        # 计算垂直起始位置
-        if text_valign == "top":
-            y_start = ty1
-        elif text_valign == "middle":
-            y_start = ty1 + (region_h_text - best_block_h) // 2
-        else:  # bottom
-            y_start = ty2 - best_block_h
-
-        # 绘制文字
-        y_pos = y_start
-        bracket_stack = []
-        emoji_iter_index = 0
-        total_emojis = len(emoji_list)
-
-        # 解析颜色片段
-        def parse_color_segments(
-            s: str, bracket_stack: list
-        ) -> Tuple[list[tuple[str, Tuple[int, int, int]]], list]:
-            segs: list[tuple[str, Tuple[int, int, int]]] = []
-            buf = ""
-
-            for ch in s:
-                if ch in bracket_pairs:
-                    if buf:
-                        current_color = bracket_color if bracket_stack else color
-                        segs.append((buf, current_color))
-                        buf = ""
-
-                    if ch in ('"', "'", "`"):
-                        if bracket_stack and bracket_stack[-1] == ch:
-                            segs.append((ch, bracket_color))
-                            bracket_stack.pop()
-                        else:
-                            segs.append((ch, bracket_color))
-                            bracket_stack.append(ch)
-                    else:
-                        segs.append((ch, bracket_color))
-                        bracket_stack.append(ch)
-
-                elif ch in bracket_pairs.values():
-                    if buf:
-                        segs.append((buf, bracket_color))
-                        buf = ""
-
-                    segs.append((ch, bracket_color))
-
-                    if bracket_stack:
-                        last_bracket = bracket_stack[-1]
-                        if bracket_pairs.get(last_bracket) == ch:
-                            bracket_stack.pop()
-                else:
-                    buf += ch
-                    
-            if buf:
-                current_color = bracket_color if bracket_stack else color
-                segs.append((buf, current_color))
-
-            return segs, bracket_stack
-
-        text_align = CONFIGS.style.text_align
-        for ln in best_lines:
-            line_w = draw.textlength(ln, font=font)
-
-            if text_align == "left":
-                x_pos = tx1
-            elif text_align == "center":
-                x_pos = tx1 + (region_w_text - line_w) // 2
-            else:
-                x_pos = tx2 - line_w
-
-            segments, bracket_stack = parse_color_segments(ln, bracket_stack)
-
-            for seg_text, seg_color in segments:
-                if not seg_text:
-                    continue
-
-                i = 0
-                L = len(seg_text)
-                while i < L:
-                    ch = seg_text[i]
-                    if ch == PLACEHOLDER_CHAR:
-                        if emoji_iter_index < total_emojis:
-                            emoji_seq = emoji_list[emoji_iter_index]
-                            emoji_iter_index += 1
-                            width = draw_text_or_emoji(draw, x_pos, y_pos, emoji_seq, seg_color, emoji_size)
-                            x_pos += width
-                        else:
-                            width = draw_text_or_emoji(draw, x_pos, y_pos, EMOJI_FALLBACK_CHAR, seg_color, None)
-                            x_pos += width
-                        i += 1
-                    else:
-                        j = i
-                        while j < L and seg_text[j] != PLACEHOLDER_CHAR:
-                            j += 1
-                        text_fragment = seg_text[i:j]
-                        width = draw_text_or_emoji(draw, x_pos, y_pos, text_fragment, seg_color, None)
-                        x_pos += width
-                        i = j
-
-            y_pos += best_line_h
-            if y_pos - y_start > region_h_text:
-                break
-
-        if emoji_iter_index < total_emojis:
-            print(f"[draw] 警告：有 {total_emojis - emoji_iter_index} 个 emoji 未被绘制（占位符不足）")
-        print(f"绘制耗时: {int((time.time() - st)*1000)}")
-        st=time.time()
-        
-    # --- 压缩图片 ---
-    compression_setting = CONFIGS.gui_settings.get("image_compression", None)
-    if compression_setting and compression_setting.get("pixel_reduction_enabled", False):
-        reduction_ratio = CONFIGS.gui_settings["image_compression"].get("pixel_reduction_ratio", 50) / 100.0
-        new_width = max(int(img.width * (1 - reduction_ratio)), 300)
-        new_height = max(int(img.height * (1 - reduction_ratio)), 100)
-        img = img.resize((new_width, new_height), Image.Resampling.BILINEAR)
-        print(f"压缩耗时: {int((time.time() - st)*1000)}")
-        st=time.time()
-
-    # --- 输出 BMP ---
-    buf = BytesIO()
-    img_rgb = img.convert("RGB")
-    img_rgb.save(buf, format="BMP")
-    bmp_data = buf.getvalue()[14:]
-        
-    print(f"输出耗时: {int((time.time() - st)*1000)}")
-    return bmp_data
+        traceback.print_exc()
+        raise

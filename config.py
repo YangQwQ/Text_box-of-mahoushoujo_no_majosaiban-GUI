@@ -5,6 +5,7 @@ import yaml
 import json
 from sys import platform
 from path_utils import get_base_path, get_resource_path, ensure_path_exists
+from image_loader import update_dll_gui_settings, update_style_config, clear_cache
 
 class StyleConfig:
     """样式配置类"""
@@ -30,19 +31,6 @@ class StyleConfig:
         except Exception as e:
             print(f"加载默认样式配置失败: {e}")
             return None
-    
-    def get_bracket_color(self, character_name=None):
-        """获取强调色，根据是否使用角色颜色返回不同的颜色"""
-        if self.use_character_color and character_name:
-            # 使用角色颜色
-            from config import CONFIGS
-            if character_name in CONFIGS.text_configs_dict and CONFIGS.text_configs_dict[character_name]:
-                first_config = CONFIGS.text_configs_dict[character_name][0]
-                font_color = first_config.get("font_color", (239, 79, 84))
-                return f"#{font_color[0]:02x}{font_color[1]:02x}{font_color[2]:02x}"
-        
-        # 返回配置的强调色
-        return self.bracket_color
 
 class ConfigLoader:
     """配置加载器"""
@@ -107,7 +95,7 @@ class ConfigLoader:
         if style_name in self.style_configs:
             style_data = self.style_configs[style_name]
             self.current_style = style_name
-            
+            clear_cache()
             # 更新样式对象
             for key, value in style_data.items():
                 if hasattr(self.style, key):
@@ -118,6 +106,7 @@ class ConfigLoader:
                 self._update_bracket_color_from_character()
             
             # 保存上次选择的样式到GUI设置
+            update_style_config(self.style)
             self.gui_settings["last_style"] = style_name
             self.save_gui_settings()
 
@@ -426,6 +415,7 @@ class ConfigLoader:
         # 新设置到现有数据中
         existing_data |= self.gui_settings
         
+        update_dll_gui_settings(CONFIGS.gui_settings)
         # 保存回文件
         return self._save_yaml_file("settings.yml", existing_data)
 

@@ -6,7 +6,7 @@ from PIL import ImageDraw
 import re
 
 from path_utils import get_available_fonts
-from load_utils import get_unified_cache_manager
+from image_loader import clear_cache
 from config import CONFIGS
 from gui_style_components import ComponentEditor, COMPONENT_TYPES, ALIGN_MAPPING, REVERSE_ALIGN_MAPPING, COMPONENT_PROPERTIES
 
@@ -98,8 +98,7 @@ class StyleWindow:
         self._scroll_after_id = None
         
         # 预加载标识
-        self._pending_preload_tasks = {'character': False, 'background': False}
-        self._cache_manager = get_unified_cache_manager()
+        # self._pending_preload_tasks = {'character': False, 'background': False}
 
         self._setup_ui()
     
@@ -1019,11 +1018,11 @@ class StyleWindow:
             
             if default_components is not None:
                 # 清理缓存
-                self._cache_manager.clear_cache("all")
+                clear_cache("all")
                 
                 # 标记需要预加载
-                self._pending_preload_tasks['character'] = True
-                self._pending_preload_tasks['background'] = True
+                # self._pending_preload_tasks['character'] = True
+                # self._pending_preload_tasks['background'] = True
                 
                 # 更新当前样式的组件
                 CONFIGS.style.image_components = default_components
@@ -1199,9 +1198,9 @@ class StyleWindow:
         style_name = self.style_var.get()
         
         # 清理所有缓存（包括背景、角色和组件缓存）
-        self._cache_manager.clear_cache()
-        self._pending_preload_tasks["background"] = True
-        self._pending_preload_tasks["character"] = True
+        clear_cache()
+        # self._pending_preload_tasks["background"] = True
+        # self._pending_preload_tasks["character"] = True
 
         # 加载新样式配置
         CONFIGS.apply_style(style_name)
@@ -1415,25 +1414,10 @@ class StyleWindow:
         ori_comps = CONFIGS.style.image_components
         ori_comps.sort(key=lambda x: x.get("layer", 0))
 
-        pass_check = False
         for new_comp, ori_comp in zip(new_comps, ori_comps):
             if new_comp != ori_comp:
-                if new_comp.get("type") in ["character", "background"]:
-                    if new_comp.get("use_fixed_character") or new_comp.get("use_fixed_background"):
-                        self._cache_manager.clear_cache()
-                        self._pending_preload_tasks["background"] = True
-                        self._pending_preload_tasks["character"] = True
-                        break
-                    else:
-                        if new_comp.keys()^ori_comp.keys() == {"overlay"}:
-                            continue
-                    self._cache_manager.clear_cache(new_comp.get("type"))
-                    self._pending_preload_tasks[new_comp.get("type")] = True
-                    continue
-                elif not pass_check and new_comp.get("type"):
-                    pass_check = True
-                    self._cache_manager.clear_cache("layers")
-                    continue
+                clear_cache()
+                break
         
         # 更新样式配置
         success = CONFIGS.update_style(style_name, style_data)
@@ -1459,8 +1443,6 @@ class StyleWindow:
 
     def _on_close(self):
         """处理窗口关闭事件"""
-        # 检查并执行待处理的预加载任务
-        self._execute_pending_preload_tasks()
 
         # 取消所有延迟执行的任务
         if hasattr(self, '_scroll_after_id'):
@@ -1474,39 +1456,3 @@ class StyleWindow:
         
         # 销毁窗口
         self.window.destroy()
-    
-    def _execute_pending_preload_tasks(self):
-        """执行待处理的预加载任务"""
-        if not self.core or not hasattr(self.core, 'preload_manager'):
-            return
-        
-        # 获取当前样式的组件配置
-        current_components = CONFIGS.style.image_components
-        
-        # 检查角色组件是否启用
-        character_enabled = any(
-            comp.get("type") == "character" and comp.get("enabled", True)
-            for comp in current_components
-        )
-        
-        # 获取预加载设置
-        preloading_settings = CONFIGS.gui_settings.get("preloading", {})
-        preload_character = preloading_settings.get("preload_character", True)
-        preload_background = preloading_settings.get("preload_background", True)
-        
-        # 执行角色预加载任务
-        if self._pending_preload_tasks['character'] and preload_character and character_enabled:
-            current_character = CONFIGS.get_character()
-            if current_character:
-                # 提交预加载任务
-                self.core.preload_manager.submit_preload_task('character', character_name=current_character)
-                print(f"样式窗口关闭：预加载角色 {current_character}")
-        
-        # 执行背景预加载任务
-        if self._pending_preload_tasks['background'] and preload_background:
-            # 提交预加载任务
-            self.core.preload_manager.submit_preload_task('background')
-            print("样式窗口关闭：预加载背景")
-        
-        # 重置预加载任务标记
-        self._pending_preload_tasks = {'character': False, 'background': False}

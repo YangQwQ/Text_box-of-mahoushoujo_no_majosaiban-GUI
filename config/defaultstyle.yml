@@ -9,8 +9,6 @@
     fill_mode: height
     layer: 3
     name: 背景
-    overlay: c14
-    scale: 1.5
     type: background
     use_fixed_background: false
   - align: bottom-left
@@ -136,6 +134,50 @@ default:
   textbox_x: 760
   textbox_y: 355
   use_character_color: false
+安安举画板:
+  aspect_ratio: '5:4'
+  bracket_color: '#ef4f54'
+  font_family: font3
+  font_size: 120
+  image_components:
+  - align: bottom-center
+    enabled: true
+    fill_mode: width
+    layer: 0
+    name: 背景
+    type: background
+    use_fixed_background: false
+  - align: bottom-left
+    character_name: anan
+    emotion_index: 12
+    enabled: true
+    layer: 4
+    name: 角色立绘
+    offset_x: -100
+    offset_y: 1700
+    scale: 3.3
+    type: character
+    use_fixed_character: true
+  paste_image_settings:
+    align: center
+    enabled: 'off'
+    fill_mode: width
+    height: 800
+    valign: middle
+    width: 800
+    x: 1500
+    y: 200
+  shadow_color: '#000000'
+  shadow_offset_x: 0
+  shadow_offset_y: 0
+  text_align: center
+  text_color: '#000000'
+  text_valign: middle
+  textbox_height: 445
+  textbox_width: 1000
+  textbox_x: 750
+  textbox_y: 1500
+  use_character_color: false
 思索:
   aspect_ratio: '5:4'
   bracket_color: '#ef4f54'
@@ -199,7 +241,7 @@ default:
     scale: 1.5
     type: extra
   - align: middle-left
-    enabled: true
+    enabled: false
     layer: 10
     name: 反驳
     offset_x: 150
@@ -208,7 +250,7 @@ default:
     scale: 1.5
     type: extra
   - align: middle-left
-    enabled: false
+    enabled: true
     layer: 11
     name: 疑问
     offset_x: 150

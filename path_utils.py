@@ -15,6 +15,30 @@ def get_base_path():
     
     return base_path
 
+def get_internal_path(relative_path):
+    """获取程序的临时解压路径"""
+    if getattr(sys, 'frozen', False):
+        if hasattr(sys, '_MEIPASS'):
+            # 单文件模式：文件在临时解压目录
+            base_path = sys._MEIPASS
+        else:
+            # 单目录模式：文件在可执行文件目录
+            base_path = os.path.dirname(sys.executable)
+    else:
+        # 开发环境
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    
+    # 在打包环境中，优先从程序所在目录查找
+    if getattr(sys, 'frozen', False):
+        # 首先尝试程序目录下的资源文件
+        program_dir_path = os.path.join(base_path, relative_path)
+        if os.path.exists(program_dir_path):
+            return program_dir_path
+    
+    # 开发环境或打包环境未找到资源时，使用基础路径
+    resource_path = os.path.join(base_path, relative_path)
+    return resource_path
+
 def set_window_icon(window, icon_name="icon.ico"):
     """为窗口设置图标"""
     try:

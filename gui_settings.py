@@ -934,15 +934,15 @@ class SettingsWindow:
             new_pre_resize = new_settings.get("pre_resize", 1920)
             
             # 获取最新的预加载设置
-            old_PS = CONFIGS.gui_settings.get("preloading", {}).copy()
-            new_PS = new_settings.get("preloading", {})
+            # old_PS = CONFIGS.gui_settings.get("preloading", {}).copy()
+            # new_PS = new_settings.get("preloading", {})
 
             # 检查预加载设置是否从关闭变为开启（更精确的比较）
-            old_preload_char = old_PS.get("preload_character", True)
-            new_preload_char = new_PS.get("preload_character", True)
+            # old_preload_char = old_PS.get("preload_character", True)
+            # new_preload_char = new_PS.get("preload_character", True)
             
-            old_preload_bg = old_PS.get("preload_background", True)
-            new_preload_bg = new_PS.get("preload_background", True)
+            # old_preload_bg = old_PS.get("preload_background", True)
+            # new_preload_bg = new_PS.get("preload_background", True)
                         
             # 更新CONFIGS
             CONFIGS.gui_settings |= new_settings
@@ -954,19 +954,16 @@ class SettingsWindow:
                 # 如果预压缩设置发生变化，清理背景缓存
                 if old_pre_resize != new_pre_resize:
                     print(f"预压缩设置已更改: {old_pre_resize} -> {new_pre_resize}")
-                    from load_utils import get_unified_cache_manager
-                    get_unified_cache_manager().clear_cache("background")
-                    self.gui.core.preload_manager.submit_preload_task('background')
+                    from image_loader import clear_cache
+                    clear_cache("background")
                 
-                # 如果角色预加载从关闭变为开启
-                if (old_preload_char != new_preload_char and new_preload_char):
-                    # 触发预加载当前角色
-                    current_character = CONFIGS.get_character()
-                    self.gui.core.preload_manager.submit_preload_task('character', character_name=current_character)
+                # # 如果角色预加载从关闭变为开启
+                # if (old_preload_char != new_preload_char and new_preload_char):
+                #     # 触发预加载当前角色
+                #     current_character = CONFIGS.get_character()
                 
-                # 如果背景预加载从关闭变为开启
-                if (old_preload_bg != new_preload_bg and new_preload_bg):
-                    self.gui.core.preload_manager.submit_preload_task('background')
+                # # 如果背景预加载从关闭变为开启
+                # if (old_preload_bg != new_preload_bg and new_preload_bg):
                 
             # 应用设置时检查是否需要重新初始化AI模型
             self.core._reinitialize_sentiment_analyzer_if_needed()

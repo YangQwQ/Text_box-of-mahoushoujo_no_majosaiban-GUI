@@ -55,7 +55,7 @@ class ManosabaGUI:
             self.sentiment_filter_combo.config(state="readonly")
         
         # 启动预加载回调处理器
-        self._start_preload_callback_processor()
+        # self._start_preload_callback_processor()
 
         self.update_preview()
         self.update_sentiment_filter_combo()
