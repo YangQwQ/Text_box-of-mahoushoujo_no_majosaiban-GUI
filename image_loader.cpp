@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <deque>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <stack>
@@ -12,8 +10,17 @@
 #include <unordered_set>
 #include <vector>
 
-#ifdef _WIN32
-#include <windows.h>
+// 计时用
+#define _DEBUG
+#ifdef _DEBUG
+#include <chrono>
+#define DEBUG_PRINT(fmt, ...) printf("[DEBUG] " fmt "\n", ##__VA_ARGS__)
+#define TIME_SCOPE_VAR(line, name) image_loader::utils::Timer timer_##line(name)
+#define TIME_SCOPE(name) TIME_SCOPE_VAR(__LINE__, name)
+
+#else
+#define DEBUG_PRINT(fmt, ...)
+#define TIME_SCOPE(name) ((void)0)
 #endif
 
 #include <SDL.h>
@@ -21,16 +28,23 @@
 #include <SDL_ttf.h>
 #include <cJSON.h>
 
-// Debug print
-#define _DEBUG
-#ifdef _DEBUG
-#define DEBUG_PRINT(fmt, ...) printf("[DEBUG] " fmt "\n", ##__VA_ARGS__)
-#else
-#define DEBUG_PRINT(fmt, ...)
-#endif
-
 // 创建UTF-8字符串版本的括号对映射
 const std::unordered_map<std::string, std::string> lt_bracket_pairs = {{"\"", "\""}, {"[", "]"}, {"<", ">"}, {"【", "】"}, {"〔", "〕"}, {"「", "」"}, {"『", "』"}, {"〖", "〗"}, {"《", "》"}, {"〈", "〉"}, {"“", "”"}};
+
+// 简单的计时宏定义
+
+#define TIME_START_VAR(line, name) auto time_start_##line = std::chrono::high_resolution_clock::now()
+#define TIME_START(name) TIME_START_VAR(__LINE__, name)
+
+#define TIME_END_VAR(line, name)                                                                                                                                                                                                                              \
+  do {                                                                                                                                                                                                                                                        \
+    auto time_end_##line = std::chrono::high_resolution_clock::now();                                                                                                                                                                                         \
+    auto duration_##line = std::chrono::duration_cast<std::chrono::microseconds>(time_end_##line - time_start_##line);                                                                                                                                        \
+    double ms_##line = duration_##line.count() / 1000.0;                                                                                                                                                                                                      \
+    image_loader::DEBUG_PRINT("Time [%s]: %.3f ms", name, ms_##line);                                                                                                                                                                                         \
+  } while (0)
+
+#define TIME_END(name) TIME_END_VAR(__LINE__, name)
 
 namespace image_loader {
 
@@ -88,6 +102,7 @@ struct FontCacheEntry {
   char font_name[256] = {0};
   int size = 0;
   TTF_Font *font = nullptr;
+  std::unordered_map<uint32_t, int> char_width_cache; // 字符宽度缓存
   FontCacheEntry *next = nullptr;
 
   ~FontCacheEntry() {
@@ -99,6 +114,49 @@ struct FontCacheEntry {
       delete next;
       next = nullptr;
     }
+  }
+};
+
+// 文件路径缓存结构
+struct FilePathCache {
+  std::unordered_map<std::string, std::string> path_map; // 文件名(不含扩展名) -> 完整路径
+  std::mutex mutex;
+  bool initialized = false;
+
+  void Clear() {
+    std::lock_guard<std::mutex> lock(mutex);
+    path_map.clear();
+    initialized = false;
+  }
+
+  bool FindFile(const std::string &base_name, const std::vector<std::string> &extensions, std::string &found_path) {
+    std::lock_guard<std::mutex> lock(mutex);
+
+    // 先尝试直接查找缓存
+    auto it = path_map.find(base_name);
+    if (it != path_map.end()) {
+      found_path = it->second;
+      return true;
+    }
+
+    // 如果没有找到，尝试所有扩展名
+    for (const auto &ext : extensions) {
+      std::string test_path = base_name + ext;
+      SDL_RWops *file = SDL_RWFromFile(test_path.c_str(), "rb");
+      if (file) {
+        SDL_RWclose(file);
+        path_map[base_name] = test_path;
+        found_path = test_path;
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  void AddPath(const std::string &base_name, const std::string &full_path) {
+    std::lock_guard<std::mutex> lock(mutex);
+    path_map[base_name] = full_path;
   }
 };
 
@@ -150,6 +208,51 @@ struct StyleConfig {
 
 // ==================== 通用工具函数 ====================
 namespace utils {
+
+// 时间测量辅助类
+class Timer {
+private:
+  std::chrono::time_point<std::chrono::high_resolution_clock> start_time;
+  std::string name;
+  bool active;
+
+public:
+  Timer(const std::string &timer_name) : name(timer_name), active(true) { start_time = std::chrono::high_resolution_clock::now(); }
+
+  ~Timer() {
+    if (active) {
+      stop();
+    }
+  }
+
+  // 手动停止计时并返回结果
+  double stop() {
+    if (!active)
+      return 0.0;
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+    double ms = duration.count() / 1000.0;
+    DEBUG_PRINT("Timer [%s]: %.3f ms", name.c_str(), ms);
+    active = false;
+    return ms;
+  }
+
+  // 获取当前耗时（毫秒）
+  double elapsed() const {
+    auto current_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(current_time - start_time);
+    return duration.count() / 1000.0;
+  }
+
+  // 获取当前耗时（微秒）
+  double elapsed_us() const {
+    auto current_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(current_time - start_time);
+    return static_cast<double>(duration.count());
+  }
+};
+
 // 计算缩放后的尺寸
 SDL_Rect CalculateScaledRect(int src_width, int src_height, int dst_width, int dst_height, const std::string &fill_mode) {
   SDL_Rect result = {0, 0, src_width, src_height};
@@ -221,37 +324,6 @@ SDL_Rect CalculatePosition(const char *align_str, int offset_x, int offset_y, in
   pos.y += offset_y;
 
   return pos;
-}
-
-// 缩放表面
-SDL_Surface *ScaleSurface(SDL_Surface *surface, float scale) {
-  if (!surface || scale == 1.0f) {
-    return surface;
-  }
-
-  int new_width = static_cast<int>(surface->w * scale);
-  int new_height = static_cast<int>(surface->h * scale);
-
-  SDL_Surface *scaled = SDL_CreateRGBSurfaceWithFormat(0, new_width, new_height, 32, SDL_PIXELFORMAT_ABGR8888);
-  if (scaled) {
-    SDL_BlitScaled(surface, nullptr, scaled, nullptr);
-  }
-
-  return scaled;
-}
-
-// 应用缩放并释放原表面
-SDL_Surface *ApplyScaleAndFree(SDL_Surface *surface, float scale) {
-  if (scale == 1.0f) {
-    return surface;
-  }
-
-  SDL_Surface *scaled = ScaleSurface(surface, scale);
-  if (scaled && scaled != surface) {
-    SDL_FreeSurface(surface);
-  }
-
-  return scaled ? scaled : surface;
 }
 
 // 智能计算文本和图片区域分配
@@ -552,13 +624,7 @@ public:
     if (!cache_type)
       return;
 
-    if (strcmp(cache_type, "all") == 0) {
-      ClearStaticLayerCache();
-      DEBUG_PRINT("All caches cleared");
-    } else if (strcmp(cache_type, "layers") == 0) {
-      ClearStaticLayerCache();
-      DEBUG_PRINT("Static layer cache cleared");
-    }
+    ClearStaticLayerCache();
   }
 
   // Initialize SDL
@@ -665,10 +731,8 @@ public:
     }
   }
 
-  // Generate complete image
-  LoadResult GenerateCompleteImage(const char *assets_path, int canvas_width, int canvas_height, const char *components_json, const char *character_name, int emotion_index, int background_index, unsigned char **out_data, int *out_width, int *out_height) {
-
-    DEBUG_PRINT("Starting to generate complete image");
+  LoadResult GeneratePreviewImage(const char *assets_path, int canvas_width, int canvas_height, const char *components_json, const char *character_name, int emotion_index, int background_index, unsigned char **out_data, int *out_width, int *out_height) {
+    TIME_SCOPE("Starting to generate preview image");
 
     if (!InitSDL()) {
       return LoadResult::SDL_INIT_FAILED;
@@ -676,13 +740,8 @@ public:
 
     // Parse JSON
     cJSON *json_root = cJSON_Parse(components_json);
-    if (!json_root) {
+    if (!json_root || !cJSON_IsArray(json_root)) {
       DEBUG_PRINT("JSON parse error");
-      return LoadResult::JSON_PARSE_ERROR;
-    }
-
-    if (!cJSON_IsArray(json_root)) {
-      DEBUG_PRINT("JSON root is not an array");
       cJSON_Delete(json_root);
       return LoadResult::JSON_PARSE_ERROR;
     }
@@ -696,7 +755,7 @@ public:
     }
 
     // Fill with transparent
-    SDL_FillRect(canvas, nullptr, SDL_MapRGBA(canvas->format, 0, 0, 0, 0));
+    // SDL_FillRect(canvas, nullptr, SDL_MapRGBA(canvas->format, 0, 0, 0, 0));
 
     // Check for cache mark
     bool has_cache_mark = static_layer_cache_first_ != nullptr;
@@ -735,33 +794,23 @@ public:
         continue;
 
       std::string type(GetJsonString(comp_obj, "type", ""));
-
       // 需要缓存图层
       if (!has_cache_mark) {
-        // Determine component type
-        bool use_fixed_character = GetJsonBool(comp_obj, "use_fixed_character", false);
-        bool use_fixed_background = GetJsonBool(comp_obj, "use_fixed_background", false);
 
         // Determine if component is static
         bool is_static = false;
-        if (type == "textbox" || type == "extra" || type == "namebox" || type == "text") {
+        if (type == "textbox" || type == "extra" || type == "namebox" || type == "text")
           is_static = true;
-        } else if (type == "character" && use_fixed_character) {
+        else if (type == "character" && GetJsonBool(comp_obj, "use_fixed_character", false))
           is_static = true;
-        } else if (type == "background" && use_fixed_background) {
+        else if (type == "background" && GetJsonBool(comp_obj, "use_fixed_background", false))
           is_static = true;
-        }
 
         if (is_static) {
           // If it's a static component and no current static segment, create one
-          if (!current_static_segment) {
+          if (!current_static_segment)
             current_static_segment = SDL_CreateRGBSurfaceWithFormat(0, canvas_width, canvas_height, 32, SDL_PIXELFORMAT_ABGR8888);
-            if (current_static_segment) {
-              SDL_FillRect(current_static_segment, nullptr, SDL_MapRGBA(current_static_segment->format, 0, 0, 0, 0));
-              DEBUG_PRINT("Starting new static layer segment");
-            }
-          }
-        } else if (current_static_segment) {
+        } else {
           // Encounter dynamic component, save current static segment
           AddStaticLayerToCache(current_static_segment);
           current_static_segment = nullptr;
@@ -769,24 +818,22 @@ public:
         }
       }
 
-      // Get draw targets
-      SDL_Surface *draw_target1 = canvas; // Always draw to canvas
-      SDL_Surface *draw_target2 = (!has_cache_mark && current_static_segment) ? current_static_segment : nullptr;
-
       // Draw component based on type
       bool draw_success = false;
       if (type == "background") {
-        draw_success = DrawBackgroundComponent(draw_target1, draw_target2, comp_obj, background_index);
+        draw_success = DrawBackgroundComponent(canvas, current_static_segment, comp_obj, background_index);
       } else if (type == "character") {
-        draw_success = DrawCharacterComponent(draw_target1, draw_target2, comp_obj, character_name, emotion_index);
+        draw_success = DrawCharacterComponent(canvas, current_static_segment, comp_obj, character_name, emotion_index);
       } else if (type == "namebox") {
-        draw_success = DrawNameboxComponent(draw_target1, draw_target2, comp_obj);
+        draw_success = DrawNameboxComponent(canvas, current_static_segment, comp_obj);
+      } else if (type == "text") {
+        draw_success = DrawTextComponent(canvas, current_static_segment, comp_obj);
       } else {
-        draw_success = DrawGenericComponent(draw_target1, draw_target2, comp_obj);
+        draw_success = DrawGenericComponent(canvas, current_static_segment, comp_obj);
       }
 
       if (!draw_success) {
-        DEBUG_PRINT("Failed to draw component: %s", type);
+        DEBUG_PRINT("Failed to draw component: %s", type.c_str());
       }
     }
 
@@ -823,14 +870,13 @@ public:
   }
 
   LoadResult DrawContentWithTextAndImage(const char *text, const char *emoji_json, unsigned char *image_data, int image_width, int image_height, int image_pitch, unsigned char **out_data, int *out_width, int *out_height) {
-    DEBUG_PRINT("Starting DrawContentWithTextAndImage");
+    TIME_SCOPE("Starting DrawContentWithTextAndImage");
     // 1. 参数检查
     if (!text || !out_data || !out_width || !out_height) {
       DEBUG_PRINT("Invalid parameters");
       return LoadResult::FAILED;
     }
-
-    DEBUG_PRINT("Input text length: %d", strlen(text));
+    DEBUG_PRINT("Input text length: %zd", strlen(text));
 
     if (!InitSDL()) {
       DEBUG_PRINT("SDL initialization failed");
@@ -849,28 +895,12 @@ public:
 
     // 2. 获取画布
     SDL_LockMutex(cache_mutex_);
-    int canvas_width = preview_cache_->width;
-    int canvas_height = preview_cache_->height;
+    SDL_Surface *canvas = SDL_CreateRGBSurfaceWithFormatFrom(preview_cache_->data, preview_cache_->width, preview_cache_->height, 32, preview_cache_->pitch, SDL_PIXELFORMAT_ABGR8888);
     SDL_UnlockMutex(cache_mutex_);
 
-    DEBUG_PRINT("Canvas size: %dx%d", canvas_width, canvas_height);
-
-    // 创建新的画布
-    SDL_Surface *canvas = SDL_CreateRGBSurfaceWithFormat(0, canvas_width, canvas_height, 32, SDL_PIXELFORMAT_ABGR8888);
     if (!canvas) {
       DEBUG_PRINT("Failed to create canvas: %s", SDL_GetError());
       return LoadResult::FAILED;
-    }
-
-    // 先绘制缓存预览作为背景
-    SDL_LockMutex(cache_mutex_);
-    SDL_Surface *preview_surface = SDL_CreateRGBSurfaceWithFormatFrom(preview_cache_->data, preview_cache_->width, preview_cache_->height, 32, preview_cache_->pitch, SDL_PIXELFORMAT_ABGR8888);
-    SDL_UnlockMutex(cache_mutex_);
-
-    if (preview_surface) {
-      SDL_BlitSurface(preview_surface, nullptr, canvas, nullptr);
-      SDL_FreeSurface(preview_surface);
-      DEBUG_PRINT("Background preview drawn");
     }
 
     // 2. 解析emoji数据
@@ -882,27 +912,17 @@ public:
       cJSON *json_root = cJSON_Parse(emoji_json);
       if (json_root) {
         cJSON *emojis_array = cJSON_GetObjectItem(json_root, "emojis");
+        cJSON *positions_array = cJSON_GetObjectItem(json_root, "positions");
         if (emojis_array && cJSON_IsArray(emojis_array)) {
           int array_size = cJSON_GetArraySize(emojis_array);
           for (int i = 0; i < array_size; i++) {
             cJSON *item = cJSON_GetArrayItem(emojis_array, i);
             if (item && cJSON_IsString(item)) {
               emoji_list.push_back(item->valuestring);
-            }
-          }
-        }
-
-        cJSON *positions_array = cJSON_GetObjectItem(json_root, "positions");
-        if (positions_array && cJSON_IsArray(positions_array)) {
-          int array_size = cJSON_GetArraySize(positions_array);
-          for (int i = 0; i < array_size; i++) {
-            cJSON *item = cJSON_GetArrayItem(positions_array, i);
-            if (item && cJSON_IsArray(item)) {
+              item = cJSON_GetArrayItem(positions_array, i);
               cJSON *start_item = cJSON_GetArrayItem(item, 0);
               cJSON *end_item = cJSON_GetArrayItem(item, 1);
-              if (start_item && end_item && cJSON_IsNumber(start_item) && cJSON_IsNumber(end_item)) {
-                emoji_positions.push_back(std::make_pair(start_item->valueint, end_item->valueint));
-              }
+              emoji_positions.push_back(std::make_pair(start_item->valueint, end_item->valueint));
             }
           }
         }
@@ -948,28 +968,6 @@ public:
         SDL_FreeSurface(canvas);
         canvas = compressed_surface;
         DEBUG_PRINT("Renderer compression successful, new size: %dx%d", canvas->w, canvas->h);
-      } else {
-        // 渲染器缩放失败，回退到原始缩放方法
-        DEBUG_PRINT("Renderer scaling failed, falling back to software scaling");
-
-        // 创建压缩后的表面
-        SDL_Surface *software_surface = SDL_CreateRGBSurfaceWithFormat(0, new_width, new_height, 32, SDL_PIXELFORMAT_ABGR8888);
-
-        if (software_surface) {
-          // 执行缩放
-          SDL_Rect dest_rect = {0, 0, new_width, new_height};
-          if (SDL_BlitScaled(canvas, nullptr, software_surface, &dest_rect) == 0) {
-            // 替换原画布
-            SDL_FreeSurface(canvas);
-            canvas = software_surface;
-            DEBUG_PRINT("Software compression successful, new size: %dx%d", canvas->w, canvas->h);
-          } else {
-            DEBUG_PRINT("Failed to scale surface: %s", SDL_GetError());
-            SDL_FreeSurface(software_surface);
-          }
-        } else {
-          DEBUG_PRINT("Failed to create compressed surface: %s", SDL_GetError());
-        }
       }
     }
 
@@ -1025,25 +1023,214 @@ private:
   ImageLoaderManager() = default;
   StyleConfig style_config_;
 
-  struct TextSegmentInfo {
-    int start_byte; // 起始字节位置
-    int end_byte;   // 结束字节位置（不包含）
-    SDL_Color color;
-    bool is_emoji;
-
-    TextSegmentInfo(int s, int e, const SDL_Color &c, bool emoji = false) : start_byte(s), end_byte(e), color(c), is_emoji(emoji) {}
-  };
-
-  void ParseTextSegments(const std::string &text, const std::vector<std::string> &emoji_list, const std::vector<std::pair<int, int>> &emoji_positions, const SDL_Color &text_color, const SDL_Color &bracket_color, std::vector<TextSegmentInfo> &segments);
-
-  // 使用分段信息进行智能换行绘制
-  void DrawTextWithSegments(SDL_Surface *canvas, const std::string &text, const std::vector<TextSegmentInfo> &segments, TTF_Font *font, int emoji_size, const SDL_Rect &text_rect, AlignMode align_mode, VAlignMode valign_mode, bool has_shadow,
-                            const SDL_Color &shadow_color, int shadow_offset_x, int shadow_offset_y);
-
   // 新增：使用emoji位置信息的文本绘制函数
   void DrawTextAndEmojiToCanvas(SDL_Surface *canvas, const std::string &text, const std::vector<std::string> &emoji_list, const std::vector<std::pair<int, int>> &emoji_positions, int text_x, int text_y, int text_width, int text_height);
 
-  // 新增：使用渲染器进行高质量缩放
+  std::vector<std::pair<int, int>> FastBreakTextIntoLines(TTF_Font *font, const std::string &text, int max_width) {
+    std::vector<std::pair<int, int>> lines;
+    int text_len = static_cast<int>(text.length());
+    int start_byte = 0;
+
+    while (start_byte < text_len) {
+      int extent = 0;
+      int char_count = 0;
+
+      // 使用TTF_MeasureUTF8测量能容纳的字符数
+      const char *remaining_text = text.c_str() + start_byte;
+      if (TTF_MeasureUTF8(font, remaining_text, max_width, &extent, &char_count) == 0 && char_count > 0) {
+        // 将字符数转换为字节数
+        int byte_count = 0;
+        int chars_processed = 0;
+        int i = start_byte;
+
+        while (i < text_len && chars_processed < char_count) {
+          unsigned char c = static_cast<unsigned char>(text[i]);
+          int char_len = 1;
+
+          if (c < 0x80)
+            char_len = 1;
+          else if ((c & 0xE0) == 0xC0)
+            char_len = 2;
+          else if ((c & 0xF0) == 0xE0)
+            char_len = 3;
+          else if ((c & 0xF8) == 0xF0)
+            char_len = 4;
+
+          i += char_len;
+          byte_count += char_len;
+          chars_processed++;
+        }
+
+        int end_byte = start_byte + byte_count;
+        lines.push_back({start_byte, end_byte});
+        start_byte = end_byte;
+      } else {
+        // 无法测量，跳出循环
+        break;
+      }
+    }
+
+    if (lines.empty() && text_len > 0) {
+      // 至少添加一行
+      lines.push_back({0, text_len});
+    }
+
+    return lines;
+  }
+
+  bool FindBracketPairsInText(const std::string &text, std::vector<std::tuple<int, int, SDL_Color>> &bracket_segments, const SDL_Color &bracket_color_config) {
+    TIME_SCOPE("2. FindBracketPairsInText");
+    DEBUG_PRINT("Looking for bracket pairs in text of length %zu", text.length());
+
+    bool found_any = false;
+
+    // 使用栈来匹配括号，处理嵌套情况
+    struct BracketInfo {
+      int position;
+      std::string bracket;
+      bool is_left;
+    };
+
+    std::vector<BracketInfo> all_brackets;
+
+    // 第一步：收集所有括号的位置
+    for (size_t i = 0; i < text.length();) {
+      unsigned char c = static_cast<unsigned char>(text[i]);
+      int char_len = 1;
+
+      // 计算UTF-8字符长度
+      if (c < 0x80) {
+        char_len = 1;
+      } else if ((c & 0xE0) == 0xC0) {
+        char_len = 2;
+      } else if ((c & 0xF0) == 0xE0) {
+        char_len = 3;
+      } else if ((c & 0xF8) == 0xF0) {
+        char_len = 4;
+      }
+
+      if (i + char_len > text.length()) {
+        break;
+      }
+
+      std::string current_char = text.substr(i, char_len);
+
+      // 检查是否是括号
+      bool is_left = false;
+      bool is_bracket = false;
+      bool find_same_bracket = false;
+
+      // 先检查是否是左括号
+      auto left_it = lt_bracket_pairs.find(current_char);
+      if (left_it != lt_bracket_pairs.end()) {
+        is_bracket = true;
+        // 检查是否是左右相同的括号
+        is_left = true;
+        if (current_char == left_it->second) {
+          if (find_same_bracket) {
+            is_left = false;
+            find_same_bracket = false;
+          } else
+            find_same_bracket = true;
+        }
+      } else {
+        for (const auto &pair : lt_bracket_pairs)
+          if (!is_bracket && current_char == pair.second)
+            is_bracket = true;
+      }
+
+      if (is_bracket) {
+        all_brackets.push_back({static_cast<int>(i), current_char, is_left});
+        // DEBUG_PRINT("Found bracket '%s' at position %zu (is_left: %d)", current_char.c_str(), i, is_left);
+      }
+
+      i += char_len;
+    }
+
+    // 第二步：使用栈匹配括号
+    std::stack<BracketInfo> bracket_stack;
+
+    for (const auto &bracket : all_brackets) {
+      auto left_it = lt_bracket_pairs.find(bracket.bracket);
+
+      if (bracket.is_left) {
+        bracket_stack.push(bracket);
+      } else {
+        // 这是一个右括号，尝试在栈中找到匹配的左括号
+        std::stack<BracketInfo> temp_stack;
+        bool matched = false;
+
+        while (!bracket_stack.empty()) {
+          auto top = bracket_stack.top();
+          bracket_stack.pop();
+
+          // 检查是否匹配
+          if (top.is_left) {
+            auto it = lt_bracket_pairs.find(top.bracket);
+            if (it != lt_bracket_pairs.end() && it->second == bracket.bracket) {
+              // 找到匹配的括号对
+              bracket_segments.emplace_back(top.position, bracket.position + static_cast<int>(bracket.bracket.length()), bracket_color_config);
+              found_any = true;
+              DEBUG_PRINT("Found matching bracket pair: [%d, %d) - '%s%s'", top.position, bracket.position + static_cast<int>(bracket.bracket.length()), top.bracket.c_str(), bracket.bracket.c_str());
+              matched = true;
+
+              // 将临时栈中的括号放回
+              while (!temp_stack.empty()) {
+                bracket_stack.push(temp_stack.top());
+                temp_stack.pop();
+              }
+              break;
+            }
+          }
+
+          temp_stack.push(top);
+        }
+
+        if (!matched) {
+          // 没有找到匹配的左括号，将临时栈中的括号放回
+          while (!temp_stack.empty()) {
+            bracket_stack.push(temp_stack.top());
+            temp_stack.pop();
+          }
+        }
+      }
+    }
+
+    // 第三步：按起始位置排序并合并重叠的括号段
+    if (!bracket_segments.empty()) {
+      std::sort(bracket_segments.begin(), bracket_segments.end(), [](const auto &a, const auto &b) { return std::get<0>(a) < std::get<0>(b); });
+
+      // 合并重叠的括号段
+      std::vector<std::tuple<int, int, SDL_Color>> merged_segments;
+      auto current = bracket_segments[0];
+
+      for (size_t i = 1; i < bracket_segments.size(); i++) {
+        auto &next = bracket_segments[i];
+        int current_start = std::get<0>(current);
+        int current_end = std::get<1>(current);
+        int next_start = std::get<0>(next);
+        int next_end = std::get<1>(next);
+
+        if (next_start <= current_end) {
+          // 重叠或相邻，合并
+          if (next_end > current_end) {
+            std::get<1>(current) = next_end;
+          }
+        } else {
+          merged_segments.push_back(current);
+          current = next;
+        }
+      }
+      merged_segments.push_back(current);
+
+      bracket_segments = merged_segments;
+    }
+
+    DEBUG_PRINT("Found %zu bracket segments after merging", bracket_segments.size());
+    return found_any;
+  }
+
+  // 使用渲染器进行高质量缩放
   SDL_Surface *ScaleSurfaceWithRenderer(SDL_Surface *surface, int new_width, int new_height) {
     if (!surface || new_width <= 0 || new_height <= 0) {
       DEBUG_PRINT("Invalid parameters for renderer scaling");
@@ -1180,19 +1367,8 @@ private:
     return color;
   }
 
-  // 查找带扩展名的文件
-  bool FindFileWithExtensions(const char *base_path, const char *extensions[], char *found_path, size_t found_path_size) {
-    for (int i = 0; extensions[i]; i++) {
-      snprintf(found_path, sizeof(found_path), "%s%s", base_path, extensions[i]);
-      printf("Trying path: %s\n", found_path);
-      SDL_RWops *file = SDL_RWFromFile(found_path, "rb");
-      if (file) {
-        SDL_RWclose(file);
-        return true;
-      }
-    }
-    return false;
-  }
+  // 查找带扩展名的文件 (使用缓存优化版本)
+  bool FindFileWithExtensions(const char *base_path, const std::vector<std::string> &extensions, std::string &found_path) { return file_path_cache_.FindFile(base_path, extensions, found_path); }
 
   // 加载角色图片
   SDL_Surface *LoadCharacterImage(const char *character_name, int emotion_index) {
@@ -1203,37 +1379,22 @@ private:
     char file_path[1024];
     snprintf(file_path, sizeof(file_path), "%s/chara/%s/%s (%d)", assets_path_, character_name, character_name, emotion_index);
 
-    // Try multiple extensions
-    const char *extensions[] = {".webp", ".png", ".jpg", ".jpeg", ".bmp", nullptr};
-    char found_path[1024] = {0};
+    // 使用文件路径缓存
+    std::string found_path;
+    static const std::vector<std::string> extensions = {".webp", ".png", ".jpg", ".jpeg", ".bmp"};
 
-    for (int i = 0; extensions[i]; i++) {
-      snprintf(found_path, sizeof(found_path), "%s%s", file_path, extensions[i]);
-      SDL_RWops *file = SDL_RWFromFile(found_path, "rb");
-      if (file) {
-        SDL_RWclose(file);
-        break;
-      }
-      found_path[0] = '\0';
-    }
-
-    if (found_path[0] == '\0') {
+    if (!FindFileWithExtensions(file_path, extensions, found_path)) {
       DEBUG_PRINT("Character image not found: %s", file_path);
       return nullptr;
     }
 
     // Load image
-    SDL_Surface *surface = IMG_Load(found_path);
+    SDL_Surface *surface = IMG_Load(found_path.c_str());
     if (!surface) {
-      DEBUG_PRINT("Failed to load character: %s", found_path);
+      DEBUG_PRINT("Failed to load character: %s", found_path.c_str());
       return nullptr;
     }
-
-    // Convert to RGBA format
-    SDL_Surface *rgba_surface = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_ABGR8888, 0);
-    SDL_FreeSurface(surface);
-
-    return rgba_surface;
+    return surface;
   }
 
   // 加载背景图片
@@ -1245,52 +1406,27 @@ private:
     char file_path[1024];
     snprintf(file_path, sizeof(file_path), "%s/background/%s", assets_path_, background_name);
 
-    // Try multiple extensions
-    const char *extensions[] = {".webp", ".png", ".jpg", ".jpeg", ".bmp", nullptr};
-    char found_path[1024] = {0};
+    // 使用文件路径缓存
+    std::string found_path;
+    static const std::vector<std::string> extensions = {".webp", ".png", ".jpg", ".jpeg", ".bmp"};
 
-    for (int i = 0; extensions[i]; i++) {
-      snprintf(found_path, sizeof(found_path), "%s%s", file_path, extensions[i]);
-      SDL_RWops *file = SDL_RWFromFile(found_path, "rb");
-      if (file) {
-        SDL_RWclose(file);
-        break;
-      }
-      found_path[0] = '\0';
-    }
-
-    // If not found in background folder, try shader folder
-    if (found_path[0] == '\0') {
+    if (!FindFileWithExtensions(file_path, extensions, found_path)) {
+      // If not found in background folder, try shader folder
       snprintf(file_path, sizeof(file_path), "%s/shader/%s", assets_path_, background_name);
 
-      for (int i = 0; extensions[i]; i++) {
-        snprintf(found_path, sizeof(found_path), "%s%s", file_path, extensions[i]);
-        SDL_RWops *file = SDL_RWFromFile(found_path, "rb");
-        if (file) {
-          SDL_RWclose(file);
-          break;
-        }
-        found_path[0] = '\0';
+      if (!FindFileWithExtensions(file_path, extensions, found_path)) {
+        DEBUG_PRINT("Background image not found: %s", background_name);
+        return nullptr;
       }
-    }
-
-    if (found_path[0] == '\0') {
-      DEBUG_PRINT("Background image not found: %s", background_name);
-      return nullptr;
     }
 
     // Load image
-    SDL_Surface *surface = IMG_Load(found_path);
+    SDL_Surface *surface = IMG_Load(found_path.c_str());
     if (!surface) {
-      DEBUG_PRINT("Failed to load background: %s", found_path);
+      DEBUG_PRINT("Failed to load background: %s", found_path.c_str());
       return nullptr;
     }
-
-    // Convert to RGBA format
-    SDL_Surface *rgba_surface = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_ABGR8888, 0);
-    SDL_FreeSurface(surface);
-
-    return rgba_surface;
+    return surface;
   }
 
   // 加载组件图片
@@ -1299,7 +1435,6 @@ private:
       return nullptr;
 
     // Build component path
-    char comp_path[1024];
     char base_name[256];
     strncpy(base_name, overlay, sizeof(base_name) - 1);
     base_name[sizeof(base_name) - 1] = '\0';
@@ -1310,40 +1445,32 @@ private:
     char base_path[1024];
     snprintf(base_path, sizeof(base_path), "%s/shader/%s", assets_path_, base_name);
 
-    // Try multiple extensions
-    const char *extensions[] = {".webp", ".png", ".jpg", ".jpeg", ".bmp", nullptr};
-    SDL_Surface *comp_surface = nullptr;
+    // 使用文件路径缓存
+    std::string found_path;
+    static const std::vector<std::string> extensions = {".webp", ".png", ".jpg", ".jpeg", ".bmp"};
 
-    for (int i = 0; extensions[i]; i++) {
-      snprintf(comp_path, sizeof(comp_path), "%s%s", base_path, extensions[i]);
-      comp_surface = IMG_Load(comp_path);
-      if (comp_surface)
-        break;
-    }
-
-    if (!comp_surface) {
+    if (!FindFileWithExtensions(base_path, extensions, found_path)) {
       return nullptr;
     }
 
-    SDL_Surface *rgba_surface = SDL_ConvertSurfaceFormat(comp_surface, SDL_PIXELFORMAT_ABGR8888, 0);
-    SDL_FreeSurface(comp_surface);
-
-    return rgba_surface;
+    SDL_Surface *comp_surface = IMG_Load(found_path.c_str());
+    if (!comp_surface) {
+      return nullptr;
+    }
+    return comp_surface;
   }
 
   // 背景组件绘制
   bool DrawBackgroundComponent(SDL_Surface *target1, SDL_Surface *target2, cJSON *comp_obj, int background_index) {
-    const char *overlay = GetJsonString(comp_obj, "overlay", "");
+    bool use_fixed_bg = GetJsonBool(comp_obj, "use_fixed_background", false);
     char bg_name[32];
-
-    if (strlen(overlay) > 0) {
-      char base_name[256];
-      strncpy(base_name, overlay, sizeof(base_name) - 1);
-      char *dot = strrchr(base_name, '.');
+    DEBUG_PRINT("draw background");
+    if (use_fixed_bg) {
+      const char *overlay = GetJsonString(comp_obj, "overlay", "");
+      strncpy(bg_name, overlay, sizeof(bg_name) - 1);
+      char *dot = strrchr(bg_name, '.');
       if (dot)
         *dot = '\0';
-      strncpy(bg_name, base_name, sizeof(bg_name));
-      bg_name[sizeof(bg_name) - 1] = '\0';
     } else {
       snprintf(bg_name, sizeof(bg_name), "c%d", background_index);
     }
@@ -1352,22 +1479,30 @@ private:
     if (!bg_surface)
       return false;
 
-    // 使用工具函数应用缩放
+    // 使用渲染器进行高质量缩放
     float scale = static_cast<float>(GetJsonNumber(comp_obj, "scale", 1.0));
-    SDL_Surface *final_surface = utils::ApplyScaleAndFree(bg_surface, scale);
+    SDL_Surface *final_surface = bg_surface;
+
+    if (scale != 1.0f) {
+      SDL_Surface *scaled_surface = ScaleSurfaceWithRenderer(bg_surface, static_cast<int>(bg_surface->h * scale), static_cast<int>(bg_surface->w * scale));
+      if (scaled_surface) {
+        SDL_FreeSurface(bg_surface);
+        final_surface = scaled_surface;
+      }
+    }
 
     // 使用工具函数计算位置
     const char *align = GetJsonString(comp_obj, "align", "top-left");
     int offset_x = static_cast<int>(GetJsonNumber(comp_obj, "offset_x", 0));
     int offset_y = static_cast<int>(GetJsonNumber(comp_obj, "offset_y", 0));
 
-    SDL_Rect pos = utils::CalculatePosition(align, offset_x, offset_y, target1->w, target1->h, final_surface->w, final_surface->h);
-
     // Draw to target surfaces
+    SDL_Rect pos = utils::CalculatePosition(align, offset_x, offset_y, target1->w, target1->h, final_surface->w, final_surface->h);
+    SDL_Rect pos1 = pos;
     if (target1)
       SDL_BlitSurface(final_surface, nullptr, target1, &pos);
     if (target2)
-      SDL_BlitSurface(final_surface, nullptr, target2, &pos);
+      SDL_BlitSurface(final_surface, nullptr, target2, &pos1);
 
     SDL_FreeSurface(final_surface);
     return true;
@@ -1377,15 +1512,12 @@ private:
   bool DrawCharacterComponent(SDL_Surface *target1, SDL_Surface *target2, cJSON *comp_obj, const char *character_name, int emotion_index) {
     bool use_fixed_character = GetJsonBool(comp_obj, "use_fixed_character", false);
 
-    const char *draw_char_name;
-    int draw_emotion;
+    const char *draw_char_name = character_name;
+    int draw_emotion = emotion_index;
 
     if (use_fixed_character) {
       draw_char_name = GetJsonString(comp_obj, "character_name", "");
       draw_emotion = static_cast<int>(GetJsonNumber(comp_obj, "emotion_index", 1));
-    } else {
-      draw_char_name = character_name;
-      draw_emotion = emotion_index;
     }
 
     if (!draw_char_name || strlen(draw_char_name) == 0 || draw_emotion <= 0) {
@@ -1396,11 +1528,23 @@ private:
     if (!char_surface)
       return false;
 
-    // 使用工具函数应用缩放
+    // 使用渲染器进行高质量缩放
     float comp_scale = static_cast<float>(GetJsonNumber(comp_obj, "scale", 1.0));
     float chara_scale = static_cast<float>(GetJsonNumber(comp_obj, "scale1", 1.0));
     float scale = comp_scale * chara_scale;
-    SDL_Surface *final_surface = utils::ApplyScaleAndFree(char_surface, scale);
+
+    SDL_Surface *final_surface = char_surface;
+
+    if (scale != 1.0f) {
+      int new_width = static_cast<int>(char_surface->w * scale);
+      int new_height = static_cast<int>(char_surface->h * scale);
+
+      SDL_Surface *scaled_surface = ScaleSurfaceWithRenderer(char_surface, new_width, new_height);
+      if (scaled_surface) {
+        SDL_FreeSurface(char_surface);
+        final_surface = scaled_surface;
+      }
+    }
 
     // 使用工具函数计算位置
     const char *align = GetJsonString(comp_obj, "align", "top-left");
@@ -1412,18 +1556,12 @@ private:
     int offset_y = comp_offset_y + chara_offset_y;
 
     SDL_Rect pos = utils::CalculatePosition(align, offset_x, offset_y, target1->w, target1->h, final_surface->w, final_surface->h);
+    SDL_Rect pos1 = pos;
 
-    SDL_Surface *temp_layer = SDL_CreateRGBSurfaceWithFormat(0, target1->w, target1->h, 32, SDL_PIXELFORMAT_ABGR8888);
-
-    SDL_BlitSurface(final_surface, nullptr, temp_layer, &pos);
-    SDL_FreeSurface(final_surface);
-    final_surface = temp_layer;
-
-    // Draw to target surfaces
     if (target1)
-      SDL_BlitSurface(final_surface, nullptr, target1, nullptr);
+      SDL_BlitSurface(final_surface, nullptr, target1, &pos);
     if (target2)
-      SDL_BlitSurface(final_surface, nullptr, target2, nullptr);
+      SDL_BlitSurface(final_surface, nullptr, target2, &pos1);
 
     SDL_FreeSurface(final_surface);
     return true;
@@ -1431,7 +1569,6 @@ private:
 
   SDL_Surface *DrawNameboxWithText(cJSON *comp_obj) {
     const char *overlay = GetJsonString(comp_obj, "overlay", "");
-    // DEBUG_PRINT("draw_namebox_with_text: overlay = %s", overlay);
 
     if (strlen(overlay) == 0) {
       DEBUG_PRINT("draw_namebox_with_text: Empty overlay");
@@ -1445,8 +1582,6 @@ private:
       return nullptr;
     }
 
-    // DEBUG_PRINT("draw_namebox_with_text: Namebox loaded, size: %dx%d", namebox_surface->w, namebox_surface->h);
-
     // 获取文本配置
     cJSON *textcfg_obj = cJSON_GetObjectItem(comp_obj, "textcfg");
     if (!textcfg_obj || !cJSON_IsArray(textcfg_obj)) {
@@ -1455,7 +1590,6 @@ private:
     }
 
     int text_config_count = cJSON_GetArraySize(textcfg_obj);
-    // DEBUG_PRINT("draw_namebox_with_text: Found %d text configurations", text_config_count);
 
     if (text_config_count == 0) {
       DEBUG_PRINT("draw_namebox_with_text: Empty text configurations for namebox");
@@ -1468,29 +1602,20 @@ private:
       cJSON *config_obj = cJSON_GetArrayItem(textcfg_obj, i);
       if (config_obj) {
         int font_size = static_cast<int>(GetJsonNumber(config_obj, "font_size", 92.0));
-        // DEBUG_PRINT("draw_namebox_with_text: Config %d, font_size = %d", i, font_size);
         if (font_size > max_font_size) {
           max_font_size = font_size;
         }
       }
     }
 
-    if (max_font_size == 0) {
-      max_font_size = 92; // 默认值
-    }
-    // DEBUG_PRINT("draw_namebox_with_text: Max font size = %d", max_font_size);
-
     // 计算基线位置（基于最大字体大小）- 高度的65%
     int baseline_y = static_cast<int>(namebox_surface->h * 0.65);
-    // DEBUG_PRINT("draw_namebox_with_text: baseline_y = %d (namebox height = %d)", baseline_y, namebox_surface->h);
 
     // 起始X位置 - 以270为中心，根据最大字体大小调整
     int current_x = 270 - max_font_size / 2;
-    // DEBUG_PRINT("draw_namebox_with_text: Starting current_x = %d", current_x);
 
     // 获取字体名称
     const char *font_name = GetJsonString(comp_obj, "font_name", "font3");
-    // DEBUG_PRINT("draw_namebox_with_text: font_name = %s", font_name);
 
     // 绘制每个文本
     for (int i = 0; i < text_config_count; i++) {
@@ -1501,22 +1626,16 @@ private:
 
       const char *text = GetJsonString(config_obj, "text", "");
       if (strlen(text) == 0) {
-        // DEBUG_PRINT("draw_namebox_with_text: Config %d has empty text", i);
         continue;
       }
 
       int font_size = static_cast<int>(GetJsonNumber(config_obj, "font_size", 92.0));
-      //   DEBUG_PRINT("draw_namebox_with_text: Drawing text: '%s', font_size = %d", text, font_size);
 
-      // 获取字体颜色
+      // 获取颜色配置
       SDL_Color text_color;
       cJSON *color_obj = cJSON_GetObjectItem(config_obj, "font_color");
       if (color_obj) {
         text_color = ParseColor(color_obj);
-        // DEBUG_PRINT("draw_namebox_with_text: Color RGB(%d, %d, %d)", text_color.r, text_color.g, text_color.b);
-      } else {
-        text_color = {255, 255, 255, 255}; // 默认白色
-        // DEBUG_PRINT("draw_namebox_with_text: Using default color");
       }
 
       // 获取字体
@@ -1533,22 +1652,13 @@ private:
       int text_width, text_height;
       TTF_SizeUTF8(font, text, &text_width, &text_height);
 
-      // 获取字体的ascent（基线以上的高度）
-      int ascent = TTF_FontAscent(font);
-      //   DEBUG_PRINT("draw_namebox_with_text: Text size: %dx%d, ascent: %d", text_width, text_height, ascent);
-
       // 基线对齐：baseline_y - ascent 得到文本顶部的y坐标
-      int text_top_y = baseline_y - ascent;
+      int text_top_y = baseline_y - TTF_FontAscent(font);
 
       // 绘制阴影文字 (2像素偏移)
       SDL_Surface *shadow_surface = TTF_RenderUTF8_Blended(font, text, shadow_color);
       if (shadow_surface) {
-        int shadow_x = current_x + 2;
-        int shadow_y = text_top_y + 2;
-
-        // DEBUG_PRINT("draw_namebox_with_text: Drawing shadow at (%d, %d)", shadow_x, shadow_y);
-
-        SDL_Rect shadow_rect = {shadow_x, shadow_y, shadow_surface->w, shadow_surface->h};
+        SDL_Rect shadow_rect = {current_x + 2, text_top_y + 2, shadow_surface->w, shadow_surface->h};
         SDL_BlitSurface(shadow_surface, nullptr, namebox_surface, &shadow_rect);
         SDL_FreeSurface(shadow_surface);
       }
@@ -1560,12 +1670,7 @@ private:
         continue;
       }
 
-      int main_x = current_x;
-      int main_y = text_top_y;
-
-      //   DEBUG_PRINT("draw_namebox_with_text: Drawing main text at (%d, %d)", main_x, main_y);
-
-      SDL_Rect main_rect = {main_x, main_y, text_surface->w, text_surface->h};
+      SDL_Rect main_rect = {current_x, text_top_y, text_surface->w, text_surface->h};
       SDL_BlitSurface(text_surface, nullptr, namebox_surface, &main_rect);
 
       // 更新当前X位置为下一个文本
@@ -1581,19 +1686,29 @@ private:
 
   // 名字框组件绘制
   bool DrawNameboxComponent(SDL_Surface *target1, SDL_Surface *target2, cJSON *comp_obj) {
-    // DEBUG_PRINT("DrawNameboxComponent: Starting...");
 
     // 使用新的函数绘制带文字的namebox
     SDL_Surface *namebox_surface = DrawNameboxWithText(comp_obj);
     // 加载图像
     if (!namebox_surface) {
-      //   DEBUG_PRINT("DrawNameboxComponent: Failed to draw namebox with text");
+      DEBUG_PRINT("DrawNameboxComponent: Failed to draw namebox with text");
       return false;
     }
 
-    // 使用工具函数应用缩放
+    // 使用渲染器进行高质量缩放
     float scale = static_cast<float>(GetJsonNumber(comp_obj, "scale", 1.0));
-    SDL_Surface *final_surface = utils::ApplyScaleAndFree(namebox_surface, scale);
+    SDL_Surface *final_surface = namebox_surface;
+
+    if (scale != 1.0f) {
+      int new_width = static_cast<int>(namebox_surface->w * scale);
+      int new_height = static_cast<int>(namebox_surface->h * scale);
+
+      SDL_Surface *scaled_surface = ScaleSurfaceWithRenderer(namebox_surface, new_width, new_height);
+      if (scaled_surface) {
+        SDL_FreeSurface(namebox_surface);
+        final_surface = scaled_surface;
+      }
+    }
 
     // 使用工具函数计算位置
     const char *align = GetJsonString(comp_obj, "align", "top-left");
@@ -1601,36 +1716,23 @@ private:
     int offset_y = static_cast<int>(GetJsonNumber(comp_obj, "offset_y", 0));
 
     SDL_Rect pos = utils::CalculatePosition(align, offset_x, offset_y, target1->w, target1->h, final_surface->w, final_surface->h);
-
-    SDL_Surface *temp_layer = SDL_CreateRGBSurfaceWithFormat(0, target1->w, target1->h, 32, SDL_PIXELFORMAT_ABGR8888);
-
-    SDL_BlitSurface(final_surface, nullptr, temp_layer, &pos);
-    SDL_FreeSurface(final_surface);
-    final_surface = temp_layer;
+    SDL_Rect pos1 = pos;
 
     // 绘制到目标表面
     if (target1)
-      SDL_BlitSurface(final_surface, nullptr, target1, nullptr);
+      SDL_BlitSurface(final_surface, nullptr, target1, &pos);
     if (target2)
-      SDL_BlitSurface(final_surface, nullptr, target2, nullptr);
+      SDL_BlitSurface(final_surface, nullptr, target2, &pos1);
 
     SDL_FreeSurface(final_surface);
 
-    // DEBUG_PRINT("DrawNameboxComponent: Completed successfully");
     return true;
   }
 
   // 图层组件绘制
   bool DrawGenericComponent(SDL_Surface *target1, SDL_Surface *target2, cJSON *comp_obj) {
     const char *overlay = GetJsonString(comp_obj, "overlay", "");
-    const char *type = GetJsonString(comp_obj, "type", "");
 
-    // 处理文本组件
-    if (strcmp(type, "text") == 0) {
-      return DrawTextComponent(target1, target2, comp_obj);
-    }
-
-    // 原有的图层组件处理
     if (strlen(overlay) == 0)
       return true;
 
@@ -1638,27 +1740,38 @@ private:
     if (!comp_surface)
       return false;
 
-    // 使用工具函数应用缩放
+    // 使用渲染器进行高质量缩放
     float scale = static_cast<float>(GetJsonNumber(comp_obj, "scale", 1.0));
-    SDL_Surface *final_surface = utils::ApplyScaleAndFree(comp_surface, scale);
+    SDL_Surface *final_surface = comp_surface;
+
+    if (scale != 1.0f) {
+      int new_width = static_cast<int>(comp_surface->w * scale);
+      int new_height = static_cast<int>(comp_surface->h * scale);
+
+      SDL_Surface *scaled_surface = ScaleSurfaceWithRenderer(comp_surface, new_width, new_height);
+      if (scaled_surface) {
+        SDL_FreeSurface(comp_surface);
+        final_surface = scaled_surface;
+      }
+    }
 
     // 使用工具函数计算位置
     const char *align = GetJsonString(comp_obj, "align", "top-left");
     int offset_x = static_cast<int>(GetJsonNumber(comp_obj, "offset_x", 0));
     int offset_y = static_cast<int>(GetJsonNumber(comp_obj, "offset_y", 0));
 
-    SDL_Rect pos = utils::CalculatePosition(align, offset_x, offset_y, target1->w, target1->h, final_surface->w, final_surface->h);
-
     // Draw to target surfaces
+    SDL_Rect pos = utils::CalculatePosition(align, offset_x, offset_y, target1->w, target1->h, final_surface->w, final_surface->h);
+    SDL_Rect pos1 = pos;
+
     if (target1)
       SDL_BlitSurface(final_surface, nullptr, target1, &pos);
     if (target2)
-      SDL_BlitSurface(final_surface, nullptr, target2, &pos);
+      SDL_BlitSurface(final_surface, nullptr, target2, &pos1);
 
     SDL_FreeSurface(final_surface);
     return true;
   }
-
   bool DrawTextComponent(SDL_Surface *target1, SDL_Surface *target2, cJSON *comp_obj) {
     const char *text = GetJsonString(comp_obj, "text", "");
     if (strlen(text) == 0) {
@@ -1677,26 +1790,12 @@ private:
     cJSON *text_color_obj = cJSON_GetObjectItem(comp_obj, "text_color");
     if (text_color_obj) {
       text_color = ParseColor(text_color_obj);
-    } else {
-      // 如果没有指定文本颜色，使用样式配置的默认颜色
-      text_color.r = style_config_.text_color[0];
-      text_color.g = style_config_.text_color[1];
-      text_color.b = style_config_.text_color[2];
-      text_color.a = style_config_.text_color[3];
     }
-
-    DEBUG_PRINT("DrawTextComponent: text_color=(%d,%d,%d,%d)", text_color.r, text_color.g, text_color.b, text_color.a);
 
     SDL_Color shadow_color = {0, 0, 0, 255};
     cJSON *shadow_color_obj = cJSON_GetObjectItem(comp_obj, "shadow_color");
     if (shadow_color_obj) {
       shadow_color = ParseColor(shadow_color_obj);
-    } else {
-      // 如果没有指定阴影颜色，使用样式配置的默认颜色
-      shadow_color.r = style_config_.shadow_color[0];
-      shadow_color.g = style_config_.shadow_color[1];
-      shadow_color.b = style_config_.shadow_color[2];
-      shadow_color.a = style_config_.shadow_color[3];
     }
 
     int shadow_offset_x = static_cast<int>(GetJsonNumber(comp_obj, "shadow_offset_x", style_config_.shadow_offset_x));
@@ -1721,147 +1820,66 @@ private:
     int text_width, text_height;
     SDL_Surface *final_text_surface = nullptr;
 
-    if (max_width > 0) {
-      // 有最大宽度，需要换行
-      DEBUG_PRINT("DrawTextComponent: Max width: %d, creating multi-line text", max_width);
+    // 使用TTF_MeasureUTF8来简化换行计算
+    std::vector<std::pair<int, int>> lines_ranges = FastBreakTextIntoLines(font, text, max_width);
 
-      // 简单的换行逻辑
-      std::vector<std::string> lines;
-      std::string current_line;
-      std::string utf8_text = text;
+    // 计算总高度
+    int line_height = TTF_FontHeight(font);
+    int line_spacing = static_cast<int>(line_height * 0.15); // 15%行间距
+    text_height = static_cast<int>(lines_ranges.size()) * line_height + static_cast<int>(lines_ranges.size() - 1) * line_spacing;
+    text_width = max_width;
 
-      // 按字符分割
-      for (size_t i = 0; i < utf8_text.size();) {
-        unsigned char c = static_cast<unsigned char>(utf8_text[i]);
-        int char_len = 1;
+    // 创建文本表面
+    final_text_surface = SDL_CreateRGBSurfaceWithFormat(0, text_width, text_height, 32, SDL_PIXELFORMAT_ABGR8888);
+    if (!final_text_surface) {
+      DEBUG_PRINT("DrawTextComponent: Failed to create text surface");
+      return false;
+    }
 
-        if (c < 0x80)
-          char_len = 1;
-        else if ((c & 0xE0) == 0xC0)
-          char_len = 2;
-        else if ((c & 0xF0) == 0xE0)
-          char_len = 3;
-        else if ((c & 0xF8) == 0xF0)
-          char_len = 4;
+    // 绘制每一行
+    int current_y = 0;
+    for (const auto &line_range : lines_ranges) {
+      int start_byte = line_range.first;
+      int end_byte = line_range.second;
 
-        if (i + char_len <= utf8_text.size()) {
-          std::string current_char = utf8_text.substr(i, char_len);
-
-          // 检查加上这个字符后是否超过最大宽度
-          std::string test_line = current_line + current_char;
-          int test_width;
-          TTF_SizeUTF8(font, test_line.c_str(), &test_width, nullptr);
-
-          if (test_width > max_width && !current_line.empty()) {
-            // 需要换行
-            lines.push_back(current_line);
-            current_line = current_char;
-          } else {
-            current_line += current_char;
-          }
-
-          i += char_len;
-        } else {
-          i++; // 跳过无效字符
-        }
-      }
-
-      if (!current_line.empty()) {
-        lines.push_back(current_line);
-      }
-
-      // 计算总高度
-      int line_height = TTF_FontHeight(font);
-      int line_spacing = static_cast<int>(line_height * 0.15); // 15%行间距
-      text_height = lines.size() * line_height + (lines.size() - 1) * line_spacing;
-      text_width = max_width;
-
-      DEBUG_PRINT("DrawTextComponent: %zu lines, total height: %d", lines.size(), text_height);
-
-      // 创建文本表面
-      final_text_surface = SDL_CreateRGBSurfaceWithFormat(0, text_width, text_height, 32, SDL_PIXELFORMAT_ABGR8888);
-      if (!final_text_surface) {
-        DEBUG_PRINT("DrawTextComponent: Failed to create text surface");
-        return false;
-      }
-
-      // 填充透明背景
-      SDL_FillRect(final_text_surface, nullptr, SDL_MapRGBA(final_text_surface->format, 0, 0, 0, 0));
-
-      // 绘制每一行
-      int current_y = 0;
-      for (const auto &line : lines) {
-        if (line.empty())
-          continue;
-
-        int line_width, single_line_height;
-        TTF_SizeUTF8(font, line.c_str(), &line_width, &single_line_height);
-
-        // 在最大宽度内水平对齐（默认左对齐）
-        int line_x = 0;
-
-        // 绘制阴影
-        if (shadow_offset_x != 0 || shadow_offset_y != 0) {
-          SDL_Surface *shadow_surface = TTF_RenderUTF8_Blended(font, line.c_str(), shadow_color);
-          if (shadow_surface) {
-            SDL_Rect shadow_rect = {line_x + shadow_offset_x, current_y + shadow_offset_y, shadow_surface->w, shadow_surface->h};
-            SDL_BlitSurface(shadow_surface, nullptr, final_text_surface, &shadow_rect);
-            SDL_FreeSurface(shadow_surface);
-          }
-        }
-
-        // 绘制文本
-        SDL_Surface *line_surface = TTF_RenderUTF8_Blended(font, line.c_str(), text_color);
-        if (line_surface) {
-          SDL_Rect line_rect = {line_x, current_y, line_surface->w, line_surface->h};
-          SDL_BlitSurface(line_surface, nullptr, final_text_surface, &line_rect);
-          SDL_FreeSurface(line_surface);
-        }
-
+      if (start_byte >= end_byte) {
         current_y += line_height + line_spacing;
-      }
-    } else {
-      // 没有最大宽度，单行绘制
-      TTF_SizeUTF8(font, text, &text_width, &text_height);
-
-      DEBUG_PRINT("DrawTextComponent: Single line, size: %dx%d", text_width, text_height);
-
-      // 创建文本表面（包含阴影）
-      int total_width = text_width + abs(shadow_offset_x);
-      int total_height = text_height + abs(shadow_offset_y);
-
-      final_text_surface = SDL_CreateRGBSurfaceWithFormat(0, total_width, total_height, 32, SDL_PIXELFORMAT_ABGR8888);
-      if (!final_text_surface) {
-        DEBUG_PRINT("DrawTextComponent: Failed to create text surface");
-        return false;
+        continue;
       }
 
-      // 填充透明背景
-      SDL_FillRect(final_text_surface, nullptr, SDL_MapRGBA(final_text_surface->format, 0, 0, 0, 0));
+      // 提取行文本
+      std::string line_str = std::string(text).substr(start_byte, end_byte - start_byte);
 
-      // 计算阴影和文本的偏移
-      int shadow_x = (shadow_offset_x < 0) ? 0 : shadow_offset_x;
-      int shadow_y = (shadow_offset_y < 0) ? 0 : shadow_offset_y;
-      int text_x = (shadow_offset_x > 0) ? 0 : -shadow_offset_x;
-      int text_y = (shadow_offset_y > 0) ? 0 : -shadow_offset_y;
+      if (line_str.empty()) {
+        current_y += line_height + line_spacing;
+        continue;
+      }
+
+      int line_width, single_line_height;
+      TTF_SizeUTF8(font, line_str.c_str(), &line_width, &single_line_height);
+
+      // 在最大宽度内水平对齐（默认左对齐）
+      int line_x = 0;
 
       // 绘制阴影
       if (shadow_offset_x != 0 || shadow_offset_y != 0) {
-        SDL_Surface *shadow_surface = TTF_RenderUTF8_Blended(font, text, shadow_color);
+        SDL_Surface *shadow_surface = TTF_RenderUTF8_Blended(font, line_str.c_str(), shadow_color);
         if (shadow_surface) {
-          SDL_Rect shadow_rect = {shadow_x, shadow_y, shadow_surface->w, shadow_surface->h};
+          SDL_Rect shadow_rect = {line_x + shadow_offset_x, current_y + shadow_offset_y, shadow_surface->w, shadow_surface->h};
           SDL_BlitSurface(shadow_surface, nullptr, final_text_surface, &shadow_rect);
           SDL_FreeSurface(shadow_surface);
         }
       }
 
       // 绘制文本
-      SDL_Surface *text_surface = TTF_RenderUTF8_Blended(font, text, text_color);
-      if (text_surface) {
-        SDL_Rect text_rect = {text_x, text_y, text_surface->w, text_surface->h};
-        SDL_BlitSurface(text_surface, nullptr, final_text_surface, &text_rect);
-        SDL_FreeSurface(text_surface);
+      SDL_Surface *line_surface = TTF_RenderUTF8_Blended(font, line_str.c_str(), text_color);
+      if (line_surface) {
+        SDL_Rect line_rect = {line_x, current_y, line_surface->w, line_surface->h};
+        SDL_BlitSurface(line_surface, nullptr, final_text_surface, &line_rect);
+        SDL_FreeSurface(line_surface);
       }
+
+      current_y += line_height + line_spacing;
     }
 
     if (!final_text_surface) {
@@ -1871,7 +1889,7 @@ private:
 
     // 使用工具函数计算位置
     SDL_Rect pos = utils::CalculatePosition(align_str, offset_x, offset_y, target1->w, target1->h, final_text_surface->w, final_text_surface->h);
-
+    SDL_Rect pos1 = pos;
     DEBUG_PRINT("DrawTextComponent: Drawing at position (%d, %d), size: %dx%d", pos.x, pos.y, pos.w, pos.h);
 
     // 绘制到目标表面
@@ -1880,17 +1898,15 @@ private:
       DEBUG_PRINT("DrawTextComponent: Drawn to target1");
     }
     if (target2) {
-      SDL_BlitSurface(final_text_surface, nullptr, target2, &pos);
+      SDL_BlitSurface(final_text_surface, nullptr, target2, &pos1);
       DEBUG_PRINT("DrawTextComponent: Drawn to target2");
     }
 
     SDL_FreeSurface(final_text_surface);
-
-    DEBUG_PRINT("DrawTextComponent: Completed successfully");
     return true;
   }
 
-  // Get font (with caching)
+  // Get font (with caching and character width caching)
   TTF_Font *GetFontCached(const char *font_name, int size) {
     if (!ttf_initialized_)
       return nullptr;
@@ -1942,9 +1958,7 @@ private:
   // 绘制图片到画布
   void DrawImageToCanvas(SDL_Surface *canvas, unsigned char *image_data, int image_width, int image_height, int image_pitch, int paste_x, int paste_y, int paste_width, int paste_height) {
     StyleConfig *config = &style_config_;
-
-    DEBUG_PRINT("Drawing image to region: %dx%d at (%d,%d)", paste_width, paste_height, paste_x, paste_y);
-    DEBUG_PRINT("Input image size: %dx%d", image_width, image_height);
+    TIME_SCOPE("DrawImageToCanvas");
 
     SDL_Surface *img_surface = SDL_CreateRGBSurfaceWithFormatFrom(image_data, image_width, image_height, 32, image_pitch, SDL_PIXELFORMAT_ABGR8888);
 
@@ -1959,22 +1973,7 @@ private:
     DEBUG_PRINT("Fill mode: %s, new size: %dx%d", config->paste_fill_mode, scaled_rect.w, scaled_rect.h);
 
     // 调整图片大小 - 使用渲染器进行高质量缩放
-    SDL_Surface *resized_surface = nullptr;
-
-    // 尝试使用渲染器进行高质量缩放
-    if (renderer_initialized_) {
-      resized_surface = ScaleSurfaceWithRenderer(img_surface, scaled_rect.w, scaled_rect.h);
-    }
-
-    // 如果渲染器缩放失败，回退到原始方法
-    if (!resized_surface) {
-      DEBUG_PRINT("Renderer scaling failed, falling back to software scaling");
-      resized_surface = SDL_CreateRGBSurfaceWithFormat(0, scaled_rect.w, scaled_rect.h, 32, SDL_PIXELFORMAT_ABGR8888);
-
-      if (resized_surface) {
-        SDL_BlitScaled(img_surface, nullptr, resized_surface, nullptr);
-      }
-    }
+    SDL_Surface *resized_surface = ScaleSurfaceWithRenderer(img_surface, scaled_rect.w, scaled_rect.h);
 
     if (resized_surface) {
       // 使用工具函数计算对齐位置
@@ -2124,304 +2123,15 @@ private:
 
   std::mutex mutex_;
 
-  // 新增：加载emoji图片
+  // 文件路径缓存
+  FilePathCache file_path_cache_;
+
+  // 加载emoji图片
   SDL_Surface *LoadEmojiImage(const std::string &emoji_text, int target_size);
   //   void DrawImageToCanvasWithRegion(SDL_Surface *canvas, unsigned char *image_data, int image_width, int image_height, int image_pitch, int region_x, int region_y, int region_width, int region_height);
-  // 新增：将emoji字符串转换为文件名
+  // 将emoji字符串转换为文件名
   std::string EmojiToFileName(const std::string &emoji_text);
 };
-
-// ==================== 新增函数实现 ====================
-
-// 实现ParseTextSegments函数
-void ImageLoaderManager::ParseTextSegments(const std::string &text, const std::vector<std::string> &emoji_list, const std::vector<std::pair<int, int>> &emoji_positions, const SDL_Color &text_color, const SDL_Color &bracket_color,
-                                           std::vector<TextSegmentInfo> &segments) {
-  DEBUG_PRINT("=== ParseTextSegments ===");
-  DEBUG_PRINT("Text length: %zu bytes", text.size());
-
-  if (emoji_positions.empty()) {
-    // 没有emoji，直接解析括号
-    std::stack<std::pair<int, SDL_Color>> bracket_stack; // 存储位置和颜色
-    int i = 0;
-
-    while (i < text.size()) {
-      unsigned char c = static_cast<unsigned char>(text[i]);
-      int char_len = 1;
-
-      if (c < 0x80)
-        char_len = 1;
-      else if ((c & 0xE0) == 0xC0)
-        char_len = 2;
-      else if ((c & 0xF0) == 0xE0)
-        char_len = 3;
-      else if ((c & 0xF8) == 0xF0)
-        char_len = 4;
-
-      std::string current_char;
-      if (i + char_len <= text.size()) {
-        current_char = text.substr(i, char_len);
-      } else {
-        current_char = text.substr(i, 1);
-        char_len = 1;
-      }
-
-      // 检查是否是左括号
-      auto it_left = lt_bracket_pairs.find(current_char);
-      if (it_left != lt_bracket_pairs.end() && bracket_stack.empty()) {
-        // 开始一个括号段
-        bracket_stack.push({i, bracket_color});
-        i += char_len;
-        continue;
-      }
-
-      // 检查是否是右括号
-      if (!bracket_stack.empty()) {
-        std::string expected_right = lt_bracket_pairs.find(text.substr(bracket_stack.top().first, char_len))->second;
-        if (current_char == expected_right) {
-          // 结束括号段
-          int start = bracket_stack.top().first;
-          SDL_Color color = bracket_stack.top().second;
-          bracket_stack.pop();
-
-          if (start < i) {
-            // 添加括号内的内容
-            segments.push_back(TextSegmentInfo(start, i, color, false));
-          }
-
-          // 添加右括号
-          segments.push_back(TextSegmentInfo(i, i + char_len, color, false));
-          i += char_len;
-          continue;
-        }
-      }
-
-      i += char_len;
-    }
-
-    // 处理剩余的普通文本
-    int last_end = 0;
-    for (const auto &seg : segments) {
-      if (seg.start_byte > last_end) {
-        segments.insert(segments.begin(), TextSegmentInfo(last_end, seg.start_byte, text_color, false));
-      }
-      last_end = seg.end_byte;
-    }
-
-    if (last_end < static_cast<int>(text.size())) {
-      segments.push_back(TextSegmentInfo(last_end, text.size(), text_color, false));
-    }
-  } else {
-    // 有emoji，合并处理
-    int current_pos = 0;
-
-    for (size_t i = 0; i < emoji_positions.size(); i++) {
-      int emoji_start = emoji_positions[i].first;
-      int emoji_end = emoji_positions[i].second;
-
-      // 添加emoji之前的文本
-      if (emoji_start > current_pos) {
-        std::string before_text = text.substr(current_pos, emoji_start - current_pos);
-        std::vector<TextSegmentInfo> before_segments;
-        ParseTextSegments(before_text, {}, {}, text_color, bracket_color, before_segments);
-
-        // 调整位置偏移
-        for (auto &seg : before_segments) {
-          seg.start_byte += current_pos;
-          seg.end_byte += current_pos;
-          segments.push_back(seg);
-        }
-      }
-
-      // 添加emoji
-      if (i < emoji_list.size()) {
-        segments.push_back(TextSegmentInfo(emoji_start, emoji_end, text_color, true));
-      }
-
-      current_pos = emoji_end;
-    }
-
-    // 添加最后的文本
-    if (current_pos < static_cast<int>(text.size())) {
-      std::string remaining_text = text.substr(current_pos);
-      std::vector<TextSegmentInfo> remaining_segments;
-      ParseTextSegments(remaining_text, {}, {}, text_color, bracket_color, remaining_segments);
-
-      for (auto &seg : remaining_segments) {
-        seg.start_byte += current_pos;
-        seg.end_byte += current_pos;
-        segments.push_back(seg);
-      }
-    }
-  }
-
-  DEBUG_PRINT("Generated %zu text segments", segments.size());
-}
-
-// 实现DrawTextWithSegments函数
-void ImageLoaderManager::DrawTextWithSegments(SDL_Surface *canvas, const std::string &text, const std::vector<TextSegmentInfo> &segments, TTF_Font *font, int emoji_size, const SDL_Rect &text_rect, AlignMode align_mode, VAlignMode valign_mode,
-                                              bool has_shadow, const SDL_Color &shadow_color, int shadow_offset_x, int shadow_offset_y) {
-  DEBUG_PRINT("=== DrawTextWithSegments ===");
-  DEBUG_PRINT("Text rect: (%d,%d) %dx%d", text_rect.x, text_rect.y, text_rect.w, text_rect.h);
-
-  // 按行组织文本段
-  struct LineInfo {
-    std::vector<TextSegmentInfo> segments;
-    int width;
-  };
-
-  std::vector<LineInfo> lines;
-  LineInfo current_line;
-  int current_width = 0;
-  int font_height = TTF_FontHeight(font);
-
-  // 智能换行：根据实际宽度决定换行位置
-  for (const auto &seg : segments) {
-    if (seg.is_emoji) {
-      // Emoji作为一个整体，不能分割
-      int seg_width = emoji_size;
-
-      // 检查是否需要换行
-      if (current_width + seg_width > text_rect.w && !current_line.segments.empty()) {
-        lines.push_back(current_line);
-        current_line.segments.clear();
-        current_width = 0;
-      }
-
-      current_line.segments.push_back(seg);
-      current_width += seg_width;
-      current_line.width = current_width;
-    } else {
-      // 普通文本逐字符处理
-      int char_pos = seg.start_byte;
-      while (char_pos < seg.end_byte) {
-        unsigned char c = static_cast<unsigned char>(text[char_pos]);
-        int char_len = 1;
-
-        if (c < 0x80)
-          char_len = 1;
-        else if ((c & 0xE0) == 0xC0)
-          char_len = 2;
-        else if ((c & 0xF0) == 0xE0)
-          char_len = 3;
-        else if ((c & 0xF8) == 0xF0)
-          char_len = 4;
-
-        std::string single_char = text.substr(char_pos, char_len);
-        int char_width;
-        TTF_SizeUTF8(font, single_char.c_str(), &char_width, nullptr);
-
-        // 检查是否需要换行
-        if (current_width + char_width > text_rect.w && !current_line.segments.empty()) {
-          lines.push_back(current_line);
-          current_line.segments.clear();
-          current_width = 0;
-        }
-
-        // 创建单字符片段
-        TextSegmentInfo char_seg(char_pos, char_pos + char_len, seg.color, false);
-
-        // 如果当前行为空或最后一个片段不是同一颜色，创建新片段
-        if (current_line.segments.empty() || current_line.segments.back().color.r != seg.color.r || current_line.segments.back().color.g != seg.color.g || current_line.segments.back().color.b != seg.color.b ||
-            current_line.segments.back().is_emoji != seg.is_emoji) {
-          current_line.segments.push_back(char_seg);
-        } else {
-          // 扩展最后一个片段
-          current_line.segments.back().end_byte = char_seg.end_byte;
-        }
-
-        current_width += char_width;
-        current_line.width = current_width;
-        char_pos += char_len;
-      }
-    }
-  }
-
-  // 添加最后一行
-  if (!current_line.segments.empty()) {
-    lines.push_back(current_line);
-  }
-
-  DEBUG_PRINT("Wrapped into %zu lines", lines.size());
-
-  // 计算总高度和垂直起始位置
-  int total_height = lines.size() * font_height;
-  int current_y = text_rect.y;
-
-  switch (valign_mode) {
-  case VAlignMode::MIDDLE:
-    current_y += (text_rect.h - total_height) / 2;
-    break;
-  case VAlignMode::BOTTOM:
-    current_y += text_rect.h - total_height;
-    break;
-  default: // TOP
-    break;
-  }
-
-  // 绘制每一行
-  for (const auto &line : lines) {
-    int line_width = line.width;
-    int current_x = text_rect.x;
-
-    // 计算水平对齐
-    switch (align_mode) {
-    case AlignMode::CENTER:
-      current_x += (text_rect.w - line_width) / 2;
-      break;
-    case AlignMode::RIGHT:
-      current_x += text_rect.w - line_width;
-      break;
-    default: // LEFT
-      break;
-    }
-
-    // 绘制行内的每个片段
-    for (const auto &seg : line.segments) {
-      if (seg.is_emoji) {
-        std::string emoji_text = text.substr(seg.start_byte, seg.end_byte - seg.start_byte);
-        SDL_Surface *emoji_surface = LoadEmojiImage(emoji_text, emoji_size);
-        if (emoji_surface) {
-          // 将emoji垂直居中于文本行
-          int emoji_y = current_y + (font_height - emoji_size) / 2;
-          SDL_Rect emoji_rect = {current_x, emoji_y, emoji_surface->w, emoji_surface->h};
-          SDL_BlitSurface(emoji_surface, nullptr, canvas, &emoji_rect);
-          current_x += emoji_surface->w;
-          SDL_FreeSurface(emoji_surface);
-        } else {
-          // emoji图片加载失败，绘制一个灰色方块作为fallback
-          DEBUG_PRINT("Failed to load emoji image, drawing fallback square");
-          int emoji_y = current_y + (font_height - emoji_size) / 2;
-          SDL_Rect fallback_rect = {current_x, emoji_y, emoji_size, emoji_size};
-          SDL_FillRect(canvas, &fallback_rect, SDL_MapRGBA(canvas->format, 200, 200, 200, 255));
-          current_x += emoji_size;
-        }
-      } else {
-        std::string segment_text = text.substr(seg.start_byte, seg.end_byte - seg.start_byte);
-
-        // 绘制阴影
-        if (has_shadow) {
-          SDL_Surface *shadow_surface = TTF_RenderUTF8_Blended(font, segment_text.c_str(), shadow_color);
-          if (shadow_surface) {
-            SDL_Rect shadow_rect = {current_x + shadow_offset_x, current_y + shadow_offset_y, shadow_surface->w, shadow_surface->h};
-            SDL_BlitSurface(shadow_surface, nullptr, canvas, &shadow_rect);
-            SDL_FreeSurface(shadow_surface);
-          }
-        }
-
-        // 绘制文本
-        SDL_Surface *text_surface = TTF_RenderUTF8_Blended(font, segment_text.c_str(), seg.color);
-        if (text_surface) {
-          SDL_Rect text_rect = {current_x, current_y, text_surface->w, text_surface->h};
-          SDL_BlitSurface(text_surface, nullptr, canvas, &text_rect);
-          current_x += text_surface->w;
-          SDL_FreeSurface(text_surface);
-        }
-      }
-    }
-
-    current_y += font_height;
-  }
-}
 
 // 实现EmojiToFileName函数
 std::string ImageLoaderManager::EmojiToFileName(const std::string &emoji_text) {
@@ -2490,25 +2200,45 @@ SDL_Surface *ImageLoaderManager::LoadEmojiImage(const std::string &emoji_text, i
 
   DEBUG_PRINT("Emoji file path: %s", file_path);
 
-  // 加载图片
+  // 使用文件路径缓存
+  std::string found_path;
+  static const std::vector<std::string> extensions = {".png", ".webp", ".jpg", ".jpeg"};
+
+  // 先尝试直接路径
   SDL_Surface *emoji_surface = IMG_Load(file_path);
+
   if (!emoji_surface) {
-    DEBUG_PRINT("Failed to load emoji image: %s", IMG_GetError());
-
-    // 尝试加载不带修饰符的基础版本（如果有修饰符）
-    // 例如，emoji_u1f596_1f3fd.png -> emoji_u1f596.png
-    size_t last_underscore = filename.rfind('_');
-    if (last_underscore != std::string::npos) {
-      std::string base_filename = filename.substr(0, last_underscore) + ".png";
-      snprintf(file_path, sizeof(file_path), "%s/emoji/%s", assets_path_, base_filename.c_str());
-      DEBUG_PRINT("Trying fallback emoji file: %s", file_path);
-      emoji_surface = IMG_Load(file_path);
+    // 如果没有找到，尝试所有扩展名
+    std::string base_name = file_path;
+    size_t dot_pos = base_name.rfind('.');
+    if (dot_pos != std::string::npos) {
+      base_name = base_name.substr(0, dot_pos);
     }
 
-    if (!emoji_surface) {
-      DEBUG_PRINT("Fallback emoji image also failed to load");
-      return nullptr;
+    if (!FindFileWithExtensions(base_name.c_str(), extensions, found_path)) {
+      DEBUG_PRINT("Failed to load emoji image: %s", IMG_GetError());
+
+      // 尝试加载不带修饰符的基础版本（如果有修饰符）
+      // 例如，emoji_u1f596_1f3fd.png -> emoji_u1f596.png
+      size_t last_underscore = filename.rfind('_');
+      if (last_underscore != std::string::npos) {
+        std::string base_filename = filename.substr(0, last_underscore) + ".png";
+        snprintf(file_path, sizeof(file_path), "%s/emoji/%s", assets_path_, base_filename.c_str());
+        DEBUG_PRINT("Trying fallback emoji file: %s", file_path);
+        emoji_surface = IMG_Load(file_path);
+      }
+
+      if (!emoji_surface) {
+        DEBUG_PRINT("Fallback emoji image also failed to load");
+        return nullptr;
+      }
+    } else {
+      emoji_surface = IMG_Load(found_path.c_str());
     }
+  }
+
+  if (!emoji_surface) {
+    return nullptr;
   }
 
   // 转换为RGBA格式
@@ -2524,19 +2254,9 @@ SDL_Surface *ImageLoaderManager::LoadEmojiImage(const std::string &emoji_text, i
 
   // 如果需要缩放，调整大小到目标尺寸
   if (target_size > 0 && (rgba_surface->w != target_size || rgba_surface->h != target_size)) {
-    SDL_Surface *scaled_surface = SDL_CreateRGBSurfaceWithFormat(0, target_size, target_size, 32, SDL_PIXELFORMAT_ABGR8888);
+    // 使用渲染器进行高质量缩放
+    SDL_Surface *scaled_surface = ScaleSurfaceWithRenderer(rgba_surface, target_size, target_size);
     if (scaled_surface) {
-      // 保持宽高比缩放
-      float scale = (static_cast<float>(target_size) / rgba_surface->w < static_cast<float>(target_size) / rgba_surface->h) ? (static_cast<float>(target_size) / rgba_surface->w) : (static_cast<float>(target_size) / rgba_surface->h);
-      int new_w = static_cast<int>(rgba_surface->w * scale);
-      int new_h = static_cast<int>(rgba_surface->h * scale);
-      int offset_x = (target_size - new_w) / 2;
-      int offset_y = (target_size - new_h) / 2;
-
-      SDL_Rect dest_rect = {offset_x, offset_y, new_w, new_h};
-      SDL_FillRect(scaled_surface, nullptr, SDL_MapRGBA(scaled_surface->format, 0, 0, 0, 0));
-      SDL_BlitScaled(rgba_surface, nullptr, scaled_surface, &dest_rect);
-
       SDL_FreeSurface(rgba_surface);
       rgba_surface = scaled_surface;
       DEBUG_PRINT("Emoji scaled to: %dx%d", rgba_surface->w, rgba_surface->h);
@@ -2546,291 +2266,362 @@ SDL_Surface *ImageLoaderManager::LoadEmojiImage(const std::string &emoji_text, i
   return rgba_surface;
 }
 
-// 修改DrawTextToCanvasWithEmojiAndPositions函数中的字体大小查找部分
 void ImageLoaderManager::DrawTextAndEmojiToCanvas(SDL_Surface *canvas, const std::string &text, const std::vector<std::string> &emoji_list, const std::vector<std::pair<int, int>> &emoji_positions, int text_x, int text_y, int text_width, int text_height) {
-  DEBUG_PRINT("=== Starting DrawTextAndEmojiToCanvas ===");
+  TIME_SCOPE("=== Starting DrawTextAndEmojiToCanvas ===");
 
   StyleConfig *config = &style_config_;
+  DEBUG_PRINT("Text area: %dx%d at (%d,%d)", text_width, text_height, text_x, text_y);
+  DEBUG_PRINT("Original text length: %zu bytes", text.length());
+  DEBUG_PRINT("Original text: '%s'", text.c_str());
 
-  // 解析文本段信息（不分割文本）
-  std::vector<TextSegmentInfo> segments;
+  // 1. 准备颜色
   SDL_Color text_color = {config->text_color[0], config->text_color[1], config->text_color[2], 255};
   SDL_Color bracket_color = {config->bracket_color[0], config->bracket_color[1], config->bracket_color[2], 255};
+  SDL_Color shadow_color = {config->shadow_color[0], config->shadow_color[1], config->shadow_color[2], 255};
 
-  ParseTextSegments(text, emoji_list, emoji_positions, text_color, bracket_color, segments);
+  DEBUG_PRINT("Text color: RGB(%d,%d,%d)", text_color.r, text_color.g, text_color.b);
+  DEBUG_PRINT("Bracket color: RGB(%d,%d,%d)", bracket_color.r, bracket_color.g, bracket_color.b);
 
-  DEBUG_PRINT("Text area: %dx%d at (%d,%d)", text_width, text_height, text_x, text_y);
+  // 2. 首先查找所有括号段
+  std::vector<std::tuple<int, int, SDL_Color>> bracket_segments;
+  FindBracketPairsInText(text, bracket_segments, bracket_color);
 
-  // 使用二分查找找到合适的字体大小
-  int min_font_size = 12;
-  int max_font_size = config->font_size;
-  int best_font_size = min_font_size;
-  TTF_Font *best_font = nullptr;
+  DEBUG_PRINT("Found %zu bracket segments", bracket_segments.size());
+  for (size_t i = 0; i < bracket_segments.size(); i++) {
+    int start = std::get<0>(bracket_segments[i]);
+    int end = std::get<1>(bracket_segments[i]);
+    DEBUG_PRINT("Bracket segment %zu: [%d, %d) - '%s'", i, start, end, text.substr(start, end - start).c_str());
+  }
 
-  DEBUG_PRINT("Starting font size search: min=%d, max=%d", min_font_size, max_font_size);
+  // 3. 创建分段列表，emoji优先级高于括号
+  std::vector<std::tuple<int, int, SDL_Color, bool>> all_segments; // start, end, color, is_emoji
 
-  // 优化：先尝试最大字号，如果合适就直接使用
-  bool font_found = false;
+  // 先添加括号段（标记为普通文本段，但使用括号颜色）
+  for (const auto &seg : bracket_segments) {
+    int start = std::get<0>(seg);
+    int end = std::get<1>(seg);
+    SDL_Color color = std::get<2>(seg);
 
-  // 1. 先尝试最大字号
-  if (max_font_size >= min_font_size) {
-    TTF_Font *max_font = GetFontCached(config->font_family, max_font_size);
-    if (max_font) {
-      // 测试最大字号是否合适
-      int font_height = TTF_FontHeight(max_font);
+    // 将括号段拆分为多个子段，排除emoji部分
+    int current_pos = start;
 
-      // 模拟换行计算
-      int current_width = 0;
-      int line_count = 1;
-      bool fits = true;
+    // 检查这个括号段内是否有emoji
+    for (const auto &emoji_pos : emoji_positions) {
+      int emoji_start = emoji_pos.first;
+      int emoji_end = emoji_pos.second;
 
-      for (const auto &seg : segments) {
-        if (seg.is_emoji) {
-          // Emoji宽度等于字体高度（近似正方形）
-          int seg_width = font_height;
-
-          // 检查是否需要换行
-          if (current_width + seg_width > text_width) {
-            if (current_width == 0) {
-              // Emoji本身宽度就超过文本框
-              fits = false;
-              break;
-            }
-            line_count++;
-            current_width = seg_width;
-
-            // 检查高度是否超过
-            if (line_count * font_height > text_height) {
-              fits = false;
-              break;
-            }
-          } else {
-            current_width += seg_width;
-          }
-        } else {
-          // 普通文本逐字符处理
-          int char_pos = seg.start_byte;
-          while (char_pos < seg.end_byte) {
-            unsigned char c = static_cast<unsigned char>(text[char_pos]);
-            int char_len = 1;
-
-            if (c < 0x80)
-              char_len = 1;
-            else if ((c & 0xE0) == 0xC0)
-              char_len = 2;
-            else if ((c & 0xF0) == 0xE0)
-              char_len = 3;
-            else if ((c & 0xF8) == 0xF0)
-              char_len = 4;
-
-            std::string single_char = text.substr(char_pos, char_len);
-            int char_width;
-            TTF_SizeUTF8(max_font, single_char.c_str(), &char_width, nullptr);
-
-            // 检查是否需要换行
-            if (current_width + char_width > text_width) {
-              if (current_width == 0) {
-                // 单个字符就超过行宽
-                fits = false;
-                break;
-              }
-              line_count++;
-              current_width = char_width;
-
-              // 检查高度是否超过
-              if (line_count * font_height > text_height) {
-                fits = false;
-                break;
-              }
-            } else {
-              current_width += char_width;
-            }
-
-            char_pos += char_len;
-          }
-
-          if (!fits)
-            break;
+      // 如果emoji在这个括号段内
+      if (emoji_start >= start && emoji_end <= end) {
+        // 添加emoji之前的括号部分
+        if (emoji_start > current_pos) {
+          all_segments.emplace_back(current_pos, emoji_start, color, false);
+          DEBUG_PRINT("Bracket subsegment before emoji: [%d, %d)", current_pos, emoji_start);
         }
-
-        if (!fits)
-          break;
+        current_pos = emoji_end;
       }
+    }
 
-      // 最终检查总高度
-      if (fits) {
-        int total_height = line_count * font_height;
-        fits = (total_height <= text_height);
-      }
-
-      DEBUG_PRINT("Testing max font size %d: fits=%d, lines=%d, font_height=%d", max_font_size, fits, line_count, font_height);
-
-      if (fits) {
-        // 最大字号合适，直接使用
-        best_font_size = max_font_size;
-        best_font = max_font;
-        font_found = true;
-        DEBUG_PRINT("Max font size %d fits, using it directly", max_font_size);
-      } else {
-        // 最大字号不合适，需要尝试更小的
-        // 注意：不要关闭字体，字体缓存会管理它
-        max_font_size--; // 最大字号不合适，从max-1开始二分查找
-      }
+    // 添加剩余部分
+    if (current_pos < end) {
+      all_segments.emplace_back(current_pos, end, color, false);
+      DEBUG_PRINT("Bracket subsegment after emoji: [%d, %d)", current_pos, end);
     }
   }
 
-  // 2. 如果最大字号不合适，进行二分查找
-  if (!font_found) {
-    DEBUG_PRINT("Max font size doesn't fit, starting binary search: min=%d, max=%d", min_font_size, max_font_size);
+  // 4. 添加emoji段（使用文本颜色）
+  for (size_t i = 0; i < emoji_positions.size(); i++) {
+    int start = emoji_positions[i].first;
+    int end = emoji_positions[i].second;
 
-    while (min_font_size <= max_font_size) {
-      int current_size = (min_font_size + max_font_size) / 2;
-      TTF_Font *test_font = GetFontCached(config->font_family, current_size);
+    if (start >= 0 && end <= static_cast<int>(text.length()) && start < end) {
+      all_segments.emplace_back(start, end, text_color, true);
+      DEBUG_PRINT("Emoji segment added: [%d, %d) - '%s'", start, end, text.substr(start, end - start).c_str());
+    }
+  }
+
+  // 5. 按起始位置排序所有段
+  std::sort(all_segments.begin(), all_segments.end(), [](const auto &a, const auto &b) { return std::get<0>(a) < std::get<0>(b); });
+
+  // 6. 填充普通文本段
+  std::vector<std::tuple<int, int, SDL_Color, bool>> final_segments;
+  int current_pos = 0;
+
+  for (const auto &seg : all_segments) {
+    int seg_start = std::get<0>(seg);
+    int seg_end = std::get<1>(seg);
+
+    // 添加seg_start之前的普通文本段
+    if (seg_start > current_pos) {
+      final_segments.emplace_back(current_pos, seg_start, text_color, false);
+      DEBUG_PRINT("Normal text segment added: [%d, %d)", current_pos, seg_start);
+    }
+
+    // 添加当前段
+    final_segments.push_back(seg);
+
+    current_pos = seg_end;
+  }
+
+  // 添加最后的普通文本段
+  if (current_pos < static_cast<int>(text.length())) {
+    final_segments.emplace_back(current_pos, static_cast<int>(text.length()), text_color, false);
+    DEBUG_PRINT("Final normal text segment added: [%d, %d)", current_pos, static_cast<int>(text.length()));
+  }
+
+  all_segments = std::move(final_segments);
+
+  DEBUG_PRINT("Total segments after processing: %zu", all_segments.size());
+
+#ifdef _DEBUG
+  // 调试：打印所有段
+  for (size_t i = 0; i < all_segments.size(); i++) {
+    const auto &seg = all_segments[i];
+    int start = std::get<0>(seg);
+    int end = std::get<1>(seg);
+    SDL_Color color = std::get<2>(seg);
+    bool is_emoji = std::get<3>(seg);
+
+    if (start < end && start < static_cast<int>(text.length())) {
+      std::string seg_text = text.substr(start, end - start);
+      bool is_bracket_color = (color.r == bracket_color.r && color.g == bracket_color.g && color.b == bracket_color.b);
+      DEBUG_PRINT("Segment %zu: [%d, %d) type=%s color=%s text='%s'", i, start, end, is_emoji ? "emoji" : "text", is_bracket_color ? "bracket" : "text", seg_text.c_str());
+    }
+  }
+#endif
+
+  // 7. 测量文本（使用特殊字符占位emoji）
+  std::string measure_text = text;
+
+  // 8. 查找最佳字体大小
+  int best_font_size = config->font_size;
+  TTF_Font *best_font = nullptr;
+  std::vector<std::pair<int, int>> best_lines;
+
+  int min_size = 12;
+  int max_size = config->font_size;
+
+  DEBUG_PRINT("Testing font sizes from %d to %d", min_size, max_size);
+
+  {
+    TIME_SCOPE("=== Finding Best Font Size ===");
+
+    while (min_size <= max_size) {
+      int mid_size = (min_size + max_size) / 2;
+      TTF_Font *test_font = GetFontCached(config->font_family, mid_size);
 
       if (!test_font) {
-        DEBUG_PRINT("Failed to get font size %d, trying smaller", current_size);
-        max_font_size = current_size - 1;
+        DEBUG_PRINT("Font size %d not available", mid_size);
+        max_size = mid_size - 1;
         continue;
       }
 
-      // 测试当前字体大小是否能适应
-      int font_height = TTF_FontHeight(test_font);
+      auto lines = FastBreakTextIntoLines(test_font, measure_text, text_width);
 
-      // 模拟换行计算
-      int current_width = 0;
-      int line_count = 1;
-      bool fits = true;
+      int line_height = TTF_FontHeight(test_font);
+      int estimated_height = static_cast<int>(lines.size() * line_height);
 
-      for (const auto &seg : segments) {
-        if (seg.is_emoji) {
-          // Emoji宽度等于字体高度（近似正方形）
-          int seg_width = font_height;
+      DEBUG_PRINT("Font size %d: %zu lines, estimated height %d (max %d)", mid_size, lines.size(), estimated_height, text_height);
 
-          // 检查是否需要换行
-          if (current_width + seg_width > text_width) {
-            if (current_width == 0) {
-              // Emoji本身宽度就超过文本框
-              fits = false;
-              break;
-            }
-            line_count++;
-            current_width = seg_width;
+      if (estimated_height <= text_height) {
+        best_font_size = mid_size;
+        best_font = test_font;
+        best_lines = lines;
+        min_size = mid_size + 1;
+        DEBUG_PRINT("Font size %d fits", mid_size);
+      } else {
+        max_size = mid_size - 1;
+        DEBUG_PRINT("Font size %d too large", mid_size);
+      }
+    }
 
-            // 检查高度是否超过
-            if (line_count * font_height > text_height) {
-              fits = false;
-              break;
-            }
-          } else {
-            current_width += seg_width;
-          }
-        } else {
-          // 普通文本逐字符处理
-          int char_pos = seg.start_byte;
-          while (char_pos < seg.end_byte) {
-            unsigned char c = static_cast<unsigned char>(text[char_pos]);
-            int char_len = 1;
+    if (!best_font) {
+      DEBUG_PRINT("No fitting font found, using fallback size 12");
+      best_font = GetFontCached(config->font_family, 12);
+      if (!best_font) {
+        DEBUG_PRINT("ERROR: Failed to get font");
+        return;
+      }
+      best_lines = FastBreakTextIntoLines(best_font, measure_text, text_width);
+    }
+  }
 
-            if (c < 0x80)
-              char_len = 1;
-            else if ((c & 0xE0) == 0xC0)
-              char_len = 2;
-            else if ((c & 0xF0) == 0xE0)
-              char_len = 3;
-            else if ((c & 0xF8) == 0xF0)
-              char_len = 4;
+  DEBUG_PRINT("Selected font size: %d", best_font_size);
+  DEBUG_PRINT("Text wrapped into %zu lines", best_lines.size());
 
-            std::string single_char = text.substr(char_pos, char_len);
-            int char_width;
-            TTF_SizeUTF8(test_font, single_char.c_str(), &char_width, nullptr);
+  // 9. 将分段分配到各行
+  int line_height = TTF_FontHeight(best_font);
+  int emoji_size = static_cast<int>(line_height * 0.9);
 
-            // 检查是否需要换行
-            if (current_width + char_width > text_width) {
-              if (current_width == 0) {
-                // 单个字符就超过行宽
-                fits = false;
-                break;
-              }
-              line_count++;
-              current_width = char_width;
+  // 为每一行分配分段
+  std::vector<std::vector<std::tuple<int, int, SDL_Color, bool>>> lines_segments;
+  size_t seg_index = 0;
 
-              // 检查高度是否超过
-              if (line_count * font_height > text_height) {
-                fits = false;
-                break;
-              }
-            } else {
-              current_width += char_width;
-            }
+  {
+    TIME_SCOPE("9. Distributing Segments to Lines");
 
-            char_pos += char_len;
-          }
+    for (const auto &line_range : best_lines) {
+      std::vector<std::tuple<int, int, SDL_Color, bool>> line_segs;
+      int line_start = line_range.first;
+      int line_end = line_range.second;
 
-          if (!fits)
-            break;
+      DEBUG_PRINT("Processing line %zu: range [%d, %d)", lines_segments.size(), line_start, line_end);
+
+      // 查找属于这一行的分段
+      while (seg_index < all_segments.size()) {
+        int seg_start = std::get<0>(all_segments[seg_index]);
+        int seg_end = std::get<1>(all_segments[seg_index]);
+
+        // 如果段在当前行之前，跳过
+        if (seg_end <= line_start) {
+          seg_index++;
+          continue;
         }
 
-        if (!fits)
+        // 如果段在当前行之后，结束当前行
+        if (seg_start >= line_end) {
           break;
+        }
+
+        // 计算段与行的重叠部分
+        int overlap_start = std::max(seg_start, line_start);
+        int overlap_end = std::min(seg_end, line_end);
+
+        if (overlap_start < overlap_end) {
+          // 添加重叠部分到当前行
+          SDL_Color seg_color = std::get<2>(all_segments[seg_index]);
+          bool is_emoji = std::get<3>(all_segments[seg_index]);
+          line_segs.emplace_back(overlap_start, overlap_end, seg_color, is_emoji);
+
+          std::string seg_text = text.substr(overlap_start, overlap_end - overlap_start);
+          DEBUG_PRINT("  Added segment [%d, %d) to line, type: %s, text: '%s'", overlap_start, overlap_end, is_emoji ? "emoji" : "text", seg_text.c_str());
+        }
+
+        // 如果段在当前行内结束，移动到下一个段
+        if (seg_end <= line_end) {
+          seg_index++;
+        } else {
+          // 段跨越到下一行，调整段的起始位置为当前行结束位置
+          std::get<0>(all_segments[seg_index]) = line_end;
+          break;
+        }
       }
 
-      // 最终检查总高度
-      if (fits) {
-        int total_height = line_count * font_height;
-        fits = (total_height <= text_height);
+      if (!line_segs.empty()) {
+        lines_segments.push_back(line_segs);
       }
+    }
 
-      DEBUG_PRINT("Testing font size %d: fits=%d, lines=%d, font_height=%d", current_size, fits, line_count, font_height);
+    DEBUG_PRINT("Distributed segments into %zu lines", lines_segments.size());
+  }
 
-      if (fits) {
-        // 当前字体大小合适，尝试更大的
-        best_font_size = current_size;
-        best_font = test_font;
-        min_font_size = current_size + 1;
-        DEBUG_PRINT("Font size %d fits, trying larger", current_size);
+  // 10. 绘制文本
+  bool has_shadow = (config->shadow_offset_x != 0 || config->shadow_offset_y != 0);
+
+  // 计算垂直起始位置
+  int total_height = static_cast<int>(lines_segments.size() * line_height);
+  int current_y = text_y;
+
+  if (strcmp(config->text_valign, "middle") == 0) {
+    current_y += (text_height - total_height) / 2;
+  } else if (strcmp(config->text_valign, "bottom") == 0) {
+    current_y += text_height - total_height;
+  }
+
+  DEBUG_PRINT("Vertical alignment: %s, start Y: %d, total height: %d", config->text_valign, current_y, total_height);
+
+  // 绘制每一行
+  for (size_t line_idx = 0; line_idx < lines_segments.size(); line_idx++) {
+    const auto &line_segs = lines_segments[line_idx];
+    if (line_segs.empty())
+      continue;
+
+    // 计算行宽
+    int line_width = 0;
+    for (const auto &seg : line_segs) {
+      int seg_start = std::get<0>(seg);
+      int seg_end = std::get<1>(seg);
+      bool is_emoji = std::get<3>(seg);
+
+      if (is_emoji) {
+        line_width += emoji_size;
       } else {
-        // 当前字体大小不合适，尝试更小的
-        max_font_size = current_size - 1;
-        DEBUG_PRINT("Font size %d doesn't fit, trying smaller", current_size);
-        // 注意：不要关闭字体，字体缓存会管理它
+        std::string seg_text = text.substr(seg_start, seg_end - seg_start);
+        int seg_width = 0;
+        TTF_SizeUTF8(best_font, seg_text.c_str(), &seg_width, nullptr);
+        line_width += seg_width;
       }
     }
-  }
 
-  // 如果没找到合适的字体，使用最小字体
-  if (!best_font) {
-    best_font_size = 12;
-    best_font = GetFontCached(config->font_family, best_font_size);
-    if (!best_font) {
-      DEBUG_PRINT("ERROR: Failed to get font even at min size");
-      return;
+    // 计算水平起始位置
+    int current_x = text_x;
+    if (strcmp(config->text_align, "center") == 0) {
+      current_x += (text_width - line_width) / 2;
+    } else if (strcmp(config->text_align, "right") == 0) {
+      current_x += text_width - line_width;
     }
-    DEBUG_PRINT("No suitable font found, using minimum size %d", best_font_size);
+
+    DEBUG_PRINT("Line %zu: width %d, start X: %d (alignment: %s)", line_idx, line_width, current_x, config->text_align);
+
+    // 绘制当前行的所有分段
+    for (const auto &seg : line_segs) {
+      int seg_start = std::get<0>(seg);
+      int seg_end = std::get<1>(seg);
+      SDL_Color seg_color = std::get<2>(seg);
+      bool is_emoji = std::get<3>(seg);
+
+      if (is_emoji) {
+        // 绘制emoji
+        std::string emoji_text = text.substr(seg_start, seg_end - seg_start);
+        DEBUG_PRINT("  Drawing emoji: '%s' at (%d, %d) with size %d", emoji_text.c_str(), current_x, current_y, emoji_size);
+
+        SDL_Surface *emoji_surface = LoadEmojiImage(emoji_text, emoji_size);
+        if (emoji_surface) {
+          int emoji_y = current_y + (line_height - emoji_size) / 2;
+          SDL_Rect emoji_rect = {current_x, emoji_y, emoji_surface->w, emoji_surface->h};
+          SDL_BlitSurface(emoji_surface, nullptr, canvas, &emoji_rect);
+          current_x += emoji_surface->w;
+          SDL_FreeSurface(emoji_surface);
+        } else {
+          // emoji加载失败，绘制占位符
+          DEBUG_PRINT("  Failed to load emoji, drawing placeholder");
+          int emoji_y = current_y + (line_height - emoji_size) / 2;
+          SDL_Rect placeholder_rect = {current_x, emoji_y, emoji_size, emoji_size};
+          SDL_FillRect(canvas, &placeholder_rect, SDL_MapRGBA(canvas->format, 128, 128, 128, 255));
+          current_x += emoji_size;
+        }
+      } else {
+        // 绘制文本
+        std::string seg_text = text.substr(seg_start, seg_end - seg_start);
+        if (seg_text.empty())
+          continue;
+
+        DEBUG_PRINT("  Drawing text: '%s' (color: RGB(%d,%d,%d)) at (%d, %d)", seg_text.c_str(), seg_color.r, seg_color.g, seg_color.b, current_x, current_y);
+
+        // 绘制阴影
+        if (has_shadow) {
+          SDL_Surface *shadow_surface = TTF_RenderUTF8_Blended(best_font, seg_text.c_str(), shadow_color);
+          if (shadow_surface) {
+            SDL_Rect shadow_rect = {current_x + config->shadow_offset_x, current_y + config->shadow_offset_y, shadow_surface->w, shadow_surface->h};
+            SDL_BlitSurface(shadow_surface, nullptr, canvas, &shadow_rect);
+            SDL_FreeSurface(shadow_surface);
+          }
+        }
+
+        // 绘制文本
+        SDL_Surface *text_surface = TTF_RenderUTF8_Blended(best_font, seg_text.c_str(), seg_color);
+        if (text_surface) {
+          SDL_Rect text_rect = {current_x, current_y, text_surface->w, text_surface->h};
+          SDL_BlitSurface(text_surface, nullptr, canvas, &text_rect);
+          current_x += text_surface->w;
+          SDL_FreeSurface(text_surface);
+        }
+      }
+    }
+
+    current_y += line_height;
   }
 
-  DEBUG_PRINT("Using font size: %d", best_font_size);
-
-  // 转换对齐模式
-  AlignMode align_mode = AlignMode::LEFT;
-  if (strcmp(config->text_align, "center") == 0)
-    align_mode = AlignMode::CENTER;
-  else if (strcmp(config->text_align, "right") == 0)
-    align_mode = AlignMode::RIGHT;
-
-  VAlignMode valign_mode = VAlignMode::TOP;
-  if (strcmp(config->text_valign, "middle") == 0)
-    valign_mode = VAlignMode::MIDDLE;
-  else if (strcmp(config->text_valign, "bottom") == 0)
-    valign_mode = VAlignMode::BOTTOM;
-
-  // 绘制文本
-  SDL_Rect text_rect = {text_x, text_y, text_width, text_height};
-  SDL_Color shadow_color = {config->shadow_color[0], config->shadow_color[1], config->shadow_color[2], 255};
-
-  DrawTextWithSegments(canvas, text, segments, best_font, int(TTF_FontHeight(best_font) * 0.9), text_rect, align_mode, valign_mode, config->shadow_offset_x != 0 || config->shadow_offset_y != 0, shadow_color, config->shadow_offset_x,
-                       config->shadow_offset_y);
-
-  DEBUG_PRINT("=== Finished DrawTextAndEmojiToCanvas ===");
+  DEBUG_PRINT("Text drawing completed");
 }
 
 } // namespace image_loader
@@ -2849,7 +2640,7 @@ __declspec(dllexport) void clear_cache(const char *cache_type) { image_loader::I
 __declspec(dllexport) int generate_complete_image(const char *assets_path, int canvas_width, int canvas_height, const char *components_json, const char *character_name, int emotion_index, int background_index, unsigned char **out_data, int *out_width,
                                                   int *out_height) {
 
-  return static_cast<int>(image_loader::ImageLoaderManager::GetInstance().GenerateCompleteImage(assets_path, canvas_width, canvas_height, components_json, character_name, emotion_index, background_index, out_data, out_width, out_height));
+  return static_cast<int>(image_loader::ImageLoaderManager::GetInstance().GeneratePreviewImage(assets_path, canvas_width, canvas_height, components_json, character_name, emotion_index, background_index, out_data, out_width, out_height));
 }
 
 __declspec(dllexport) int draw_content_simple(const char *text, const char *emoji_json, unsigned char *image_data, int image_width, int image_height, int image_pitch, unsigned char **out_data, int *out_width, int *out_height) {

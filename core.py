@@ -283,8 +283,8 @@ class ManosabaCore:
 
             if CONFIGS.style.use_character_color:
                 CONFIGS._update_bracket_color_from_character()
+                update_style_config(CONFIGS.style)
             
-            # update_style_config(CONFIGS.style)
             clear_cache()
             
             self.update_status(f"切换到角色: {character_name}")
@@ -386,26 +386,24 @@ class ManosabaCore:
             if layer_cache:
                 cp_components = layer_cache
                 for component in cp_components:
-                    if component.get("type") == "character" and not component.get("use_fixed_character", False):
-                        component["character_name"] = character_name
-                        component["emotion_index"] = emotion_index
+                    if component.get("type") == "character":
+                        if component.get("use_fixed_character", False):
+                            character_name = component["character_name"]
+                            emotion_index = component["emotion_index"]
+                        else:
+                            # 获取角色配置中的缩放
+                            character_config = CONFIGS.mahoshojo.get(character_name, {})
+                            offset = character_config.get("offset", (0, 0))
 
-                        # 获取角色配置中的缩放
-                        character_config = CONFIGS.mahoshojo.get(character_name, {})
-                        offset = character_config.get("offset", (0, 0))
-
-                        # 直接把角色缩放放进去
-                        component["scale1"] = character_config.get("scale", 1.0)
-                        
-                        # 获取表情偏移（如果有）
-                        emotion_offsets_X = character_config.get("offsetX", {})
-                        emotion_offsets_Y = character_config.get("offsetY", {})
-                        
-                        component["offset_x1"] = emotion_offsets_X.get(str(emotion_index), 0) + offset[0]
-                        component["offset_y1"] = emotion_offsets_Y.get(str(emotion_index), 0) + offset[1]
-
-                    elif component.get("type") == "background" and not component.get("use_fixed_background"):
-                        component["overlay"] = f"c{background_index}"
+                            # 直接把角色缩放放进去
+                            component["scale1"] = character_config.get("scale", 1.0)
+                            
+                            # 获取表情偏移（如果有）
+                            emotion_offsets_X = character_config.get("offsetX", {})
+                            emotion_offsets_Y = character_config.get("offsetY", {})
+                            
+                            component["offset_x1"] = emotion_offsets_X.get(str(emotion_index), 0) + offset[0]
+                            component["offset_y1"] = emotion_offsets_Y.get(str(emotion_index), 0) + offset[1]
             else:
                 # 准备组件数据
                 components = CONFIGS.get_sorted_image_components()
@@ -416,19 +414,9 @@ class ManosabaCore:
                 for component in cp_components:
                     # 特殊处理
                     if component["type"] == "character":
-                        if not component.get("use_fixed_character", False):
-                            component["character_name"] = character_name
-                            component["emotion_index"] = emotion_index
-                            
-                            # layer_cache.append(component)
-                            # compress_layer = False
-                        else:
+                        if component.get("use_fixed_character", False):
                             character_name = component["character_name"]
                             emotion_index = component["emotion_index"]
-
-                            # if not compress_layer:
-                            #     layer_cache.append({"use_cache": True})
-                            #     compress_layer = True
 
                         # 获取角色配置中的缩放
                         character_config = CONFIGS.mahoshojo.get(character_name, {})
@@ -454,8 +442,6 @@ class ManosabaCore:
                     # 对于固定背景，需要特殊处理overlay
                     elif component["type"] == "background":
                         if not component.get("use_fixed_background", False):
-                            component["overlay"] = f"c{background_index}"
-                        
                             layer_cache.append(component)
                             compress_layer = False
                         else:

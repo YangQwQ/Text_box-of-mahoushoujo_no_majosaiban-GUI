@@ -1252,18 +1252,13 @@ class StyleWindow:
             # 禁用强调颜色输入框和预览
             self.bracket_color_entry.config(state="disabled")
             self.bracket_color_preview.config(state="disabled")
-            # 变灰显示
-            self.bracket_color_preview.configure(background="gray")
         else:
             # 启用强调颜色输入框和预览
             self.bracket_color_entry.config(state="normal")
             self.bracket_color_preview.config(state="normal")
-            # 恢复颜色显示
-            color_value = self.bracket_color_var.get()
-            if validate_and_update_color_preview(self.bracket_color_var, None, color_value):
-                self.bracket_color_preview.configure(background=color_value)
-            else:
-                self.bracket_color_preview.configure(background="#EF4F54")
+        color_value = self.bracket_color_var.get()
+        if not validate_and_update_color_preview(self.bracket_color_var, None, color_value):
+            self.bracket_color_preview.configure(background="#EF4F54")
     
     def _update_text_color_preview(self, *args):
         """更新文字颜色预览 - 使用通用函数"""

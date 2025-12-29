@@ -177,7 +177,7 @@ default:
   textbox_width: 1000
   textbox_x: 750
   textbox_y: 1500
-  use_character_color: false
+  use_character_color: true
 思索:
   aspect_ratio: '5:4'
   bracket_color: '#9f91fb'
