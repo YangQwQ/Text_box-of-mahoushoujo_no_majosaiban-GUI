@@ -54,10 +54,7 @@ class ConfigLoader:
         # 情感匹配相关
         self.emotion_list = ["平静", "喜悦", "喜爱", "惊讶", "困惑", "无语", "悲伤", "愤怒", "恐惧"]
 
-        # 当前预览相关
-        self.current_character_index = 2
-
-        # 状态变量(为None时为随机选择,否则为手动选择)
+        # 状态变量(为None时为随机选择,否则为手动选择) 这两个需要移除
         self.selected_emotion = None
         self.selected_background = None
         
@@ -65,6 +62,9 @@ class ConfigLoader:
         self.style_configs = {}
         self.current_style = "default"
         self.style = StyleConfig()
+
+        # 预览组件
+        self.preview_style = None
 
         # 加载版本信息
         self.version_info = self.load_version_info()
@@ -75,7 +75,8 @@ class ConfigLoader:
         self.mahoshojo = self.load_config("chara_meta")
         self.text_configs_dict = self.load_config("text_configs")
         self.character_list = list(self.mahoshojo.keys())
-        self.current_character = self.mahoshojo[self.character_list[self.current_character_index - 1]]
+        
+        self.current_character = self._get_current_character_from_layers()
         self.keymap = self.load_config("keymap")
         self.process_whitelist = self.load_config("process_whitelist")
         self.gui_settings = self.load_config("settings")
@@ -89,7 +90,137 @@ class ConfigLoader:
         
         # 加载样式配置
         self._load_style_configs()
+        # 复制当前样式到预览样式
+        self._init_preview_style()
 
+    def _get_current_character_from_layers(self):
+        """从角色图层组件获取当前角色（第一个非固定角色的图层）"""
+        if not self.preview_style or 'image_components' not in self.preview_style:
+            return self.character_list[1] if len(self.character_list) > 1 else self.character_list[0]
+        
+        # 查找第一个角色组件
+        for component in self.preview_style['image_components']:
+            if component.get("type") == "character":
+                # 如果不使用固定角色，返回该角色的名称
+                if not component.get("use_fixed_character", False):
+                    return component.get("character_name", self.character_list[1] if len(self.character_list) > 1 else self.character_list[0])
+                # 如果使用固定角色，返回固定角色的名称
+                else:
+                    return component.get("character_name", self.character_list[1] if len(self.character_list) > 1 else self.character_list[0])
+        
+        # 如果没有找到角色组件，返回默认角色
+        return self.character_list[1] if len(self.character_list) > 1 else self.character_list[0]
+    
+    def _init_preview_style(self):
+        """初始化预览样式"""
+        if self.current_style in self.style_configs:
+            import copy
+            self.preview_style = copy.deepcopy(self.style_configs[self.current_style])
+        else:
+            # 如果当前样式不存在，使用默认样式
+            self.preview_style = copy.deepcopy(self.style_configs.get("default", {}))
+
+    def get_sorted_preview_components(self):
+        """获取排序后的预览图片组件列表（按图层顺序）"""
+        if self.preview_style and 'image_components' in self.preview_style:
+            components = self.preview_style["image_components"]
+            return sorted(components, key=lambda x: x.get("layer", 0))
+        return []
+    
+    def update_preview_component(self, layer: int, updates: Dict[str, Any]):
+        """更新指定图层的预览组件配置"""
+        if not self.preview_style or 'image_components' not in self.preview_style:
+            return False
+        
+        for component in self.preview_style['image_components']:
+            if component.get("layer") == layer:
+                component.update(updates)
+                return True
+        return False
+
+    # 添加获取预览样式属性的方法
+    def get_preview_style_value(self, key: str, default=None):
+        """获取预览样式的值"""
+        if self.preview_style:
+            return self.preview_style.get(key, default)
+        return default
+
+    # 添加更新预览样式的方法
+    def update_preview_style(self, updates: Dict[str, Any]):
+        """更新预览样式"""
+        if self.preview_style:
+            self.preview_style.update(updates)
+    
+    def get_emotion_filter_options(self, character_id=None):
+        """获取表情筛选选项"""
+        if character_id is None:
+            character_id = self.get_character()
+        
+        # 获取角色的情感-表情映射
+        character_meta = self.mahoshojo.get(character_id, {})
+        
+        # 情感列表
+        emotion_filters = ["全部"] + self.emotion_list
+        
+        # 存储筛选选项
+        filter_options = {
+            "全部": list(range(1, character_meta.get("emotion_count", 1) + 1))
+        }
+        
+        # 为每种情感添加对应的表情索引
+        for emotion in self.emotion_list:
+            if emotion in character_meta:
+                # 从角色配置中获取该情感对应的表情索引列表
+                emotion_indices = character_meta[emotion]
+                if isinstance(emotion_indices, list):
+                    filter_options[emotion] = emotion_indices
+                else:
+                    filter_options[emotion] = [emotion_indices]
+        
+        return emotion_filters, filter_options
+
+    def get_filtered_emotions(self, character_id=None, filter_name="全部"):
+        """获取筛选后的表情列表"""
+        if character_id is None:
+            character_id = self.get_character()
+        
+        emotion_filters, filter_options = self.get_emotion_filter_options(character_id)
+        
+        if filter_name == "全部":
+            # 返回所有表情
+            emotion_count = self.mahoshojo.get(character_id, {}).get("emotion_count", 1)
+            return list(range(1, emotion_count + 1))
+        elif filter_name in filter_options:
+            return filter_options[filter_name]
+        else:
+            return []
+
+    def switch_character_by_index(self, index: int) -> bool:
+        """通过索引切换角色（主要用于热键或快速切换）"""
+        if 0 < index <= len(self.character_list):
+            character_name = self.character_list[index - 1]
+            
+            # 更新第一个非固定角色的图层
+            if self.preview_style and 'image_components' in self.preview_style:
+                for component in self.preview_style['image_components']:
+                    if component.get("type") == "character" and not component.get("use_fixed_character", False):
+                        component["character_name"] = character_name
+                        self.current_character = character_name
+                        return True
+                
+                # 如果没有非固定角色图层，更新第一个角色图层
+                for component in self.preview_style['image_components']:
+                    if component.get("type") == "character":
+                        component["character_name"] = character_name
+                        component["use_fixed_character"] = True
+                        self.current_character = character_name
+                        return True
+            
+            # 如果没有角色图层，直接更新当前角色
+            self.current_character = character_name
+            return True
+        return False
+    
     def apply_style(self, style_name: str):
         """应用指定的样式配置"""
         if style_name in self.style_configs:
@@ -97,6 +228,7 @@ class ConfigLoader:
 
             self.current_style = style_name
             clear_cache()
+            
             # 更新样式对象
             for key, value in style_data.items():
                 if hasattr(self.style, key):
@@ -106,6 +238,12 @@ class ConfigLoader:
             if self.style.use_character_color:
                 self._update_bracket_color_from_character()
             
+            # 更新预览样式
+            self._init_preview_style()
+            
+            # 更新当前角色
+            self.current_character = self._get_current_character_from_layers()
+
             # 保存上次选择的样式到GUI设置
             update_style_config(self.style)
             self.gui_settings["last_style"] = style_name
@@ -332,7 +470,8 @@ class ConfigLoader:
         if index is not None:
             return self.mahoshojo[index]["full_name"] if full_name else index
         else:
-            chara = self.character_list[self.current_character_index - 1]
+            # 直接返回 current_character
+            chara = self.current_character
             return self.mahoshojo[chara]["full_name"] if full_name else chara
     
     def get_available_models(self) -> Dict[str, Dict[str, Any]]:

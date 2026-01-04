@@ -44,9 +44,9 @@ class ManosabaCore:
         self.kbd_controller = Controller()
         self.clipboard_manager = ClipboardManager()
         
-        #预览图当前的索引
-        self._preview_emotion = -1
-        self._preview_background = -1
+        # 预览图当前的索引
+        self._preview_emotion_cache = {}  # {layer: emotion_index}
+        self._preview_background_cache = {}  # {layer: background_index}
         
         # 状态更新回调
         self.status_callback = None
@@ -270,41 +270,25 @@ class ManosabaCore:
             return True
         return False
 
-    def switch_character(self, index: int) -> bool:
-        """切换到指定索引的角色"""
-        if 0 < index <= len(CONFIGS.character_list):
-            CONFIGS.current_character_index = index
-            CONFIGS.mahoshojo = CONFIGS.load_config("chara_meta")
-            CONFIGS.character_list = list(CONFIGS.mahoshojo.keys())
-            
-            # 加载当前角色的配置到current_character变量  
-            character_name = CONFIGS.get_character()
-            CONFIGS.current_character = CONFIGS.mahoshojo.get(character_name, {})
-
-            if CONFIGS.style.use_character_color:
-                CONFIGS._update_bracket_color_from_character()
-                update_style_config(CONFIGS.style)
-            
-            clear_cache()
-            
-            self.update_status(f"切换到角色: {character_name}")
-            
-            return True
-        return False
-
-    def _get_random_index(self, index_count: int, exclude_index: int = -1) -> int:
-        """随机选择表情（避免连续相同）"""
+    def _get_random_index(self, index_count: int, layer: int, cache_dict: dict, exclude_index: int = -1) -> int:
+        """随机选择表情或背景（避免连续相同）"""
         if exclude_index == -1:
+            # 如果没有排除索引，使用缓存的索引作为排除
+            exclude_index = cache_dict.get(layer, -1)
+        
+        if exclude_index == -1 or index_count == 1:
             final_index = random.randint(1, index_count)
         else:
-            # 避免连续相同表情
+            # 避免连续相同
             available_indices = [i for i in range(1, index_count + 1) if i != exclude_index]
             final_index = (
                 random.choice(available_indices)
                 if available_indices
                 else exclude_index
             )
-
+        
+        # 更新缓存
+        cache_dict[layer] = final_index
         return final_index
 
     def _active_process_allowed(self) -> bool:
@@ -360,128 +344,202 @@ class ManosabaCore:
     def generate_preview(self) -> tuple:
         """生成预览图片和相关信息"""
         st = time.time()
-        character_name = CONFIGS.get_character()
-        emotion_count = CONFIGS.current_character["emotion_count"]
-
-        # 确定表情和背景
-        emotion_index = (
-            self._get_random_index(emotion_count, exclude_index=self._preview_emotion)
-            if CONFIGS.selected_emotion is None
-            else CONFIGS.selected_emotion
-        )
-        background_index = (
-            self._get_random_index(CONFIGS.background_count, exclude_index=self._preview_background)
-            if CONFIGS.selected_background is None
-            else CONFIGS.selected_background
-        )
-
-        # 保存预览使用的表情和背景
-        self._preview_emotion = emotion_index
-        self._preview_background = background_index
-
-        # 生成预览图片（由C端缓存）
+        use_cache = get_enhanced_loader().layer_cache
         try:
-            # 使用缓存
-            layer_cache = get_enhanced_loader().layer_cache
-            if layer_cache:
-                cp_components = layer_cache
-                for component in cp_components:
-                    if component.get("type") == "character":
-                        if component.get("use_fixed_character", False):
-                            character_name = component["character_name"]
-                            emotion_index = component["emotion_index"]
-                        else:
-                            # 获取角色配置中的缩放
-                            character_config = CONFIGS.mahoshojo.get(character_name, {})
-                            offset = character_config.get("offset", (0, 0))
+            compress_layer = False
 
-                            # 直接把角色缩放放进去
-                            component["scale1"] = character_config.get("scale", 1.0)
-                            
-                            # 获取表情偏移（如果有）
-                            emotion_offsets_X = character_config.get("offsetX", {})
-                            emotion_offsets_Y = character_config.get("offsetY", {})
-                            
-                            component["offset_x1"] = emotion_offsets_X.get(str(emotion_index), 0) + offset[0]
-                            component["offset_y1"] = emotion_offsets_Y.get(str(emotion_index), 0) + offset[1]
-            else:
-                # 准备组件数据
-                components = CONFIGS.get_sorted_image_components()
-                cp_components = copy.deepcopy(components)
-
-                compress_layer = False
-                # 构建组件列表，确保顺序正确
-                for component in cp_components:
-                    # 特殊处理
-                    if component["type"] == "character":
-                        if component.get("use_fixed_character", False):
-                            character_name = component["character_name"]
-                            emotion_index = component["emotion_index"]
-
-                        # 获取角色配置中的缩放
-                        character_config = CONFIGS.mahoshojo.get(character_name, {})
-                        offset = character_config.get("offset", (0, 0))
-
-                        component["scale1"] = character_config.get("scale", 1.0)
-                        
-                        # 获取表情偏移（如果有）
-                        emotion_offsets_X = character_config.get("offsetX", {})
-                        emotion_offsets_Y = character_config.get("offsetY", {})
-                        
-                        component["offset_x1"] = emotion_offsets_X.get(str(emotion_index), 0) + offset[0]
-                        component["offset_y1"] = emotion_offsets_Y.get(str(emotion_index), 0) + offset[1]
-
-                        if not component.get("use_fixed_character", False):
-                            layer_cache.append(component)
-                            compress_layer = False
-                        else:
-                            if not compress_layer:
-                                layer_cache.append({"use_cache": True})
-                                compress_layer = True
-
-                    # 对于固定背景，需要特殊处理overlay
-                    elif component["type"] == "background":
-                        if not component.get("use_fixed_background", False):
-                            layer_cache.append(component)
-                            compress_layer = False
-                        else:
-                            if not compress_layer:
-                                layer_cache.append({"use_cache": True})
-                                compress_layer = True
-                    elif component["type"] == "namebox":
-                        component["textcfg"] = CONFIGS.text_configs_dict[character_name]
-                        component["font_name"] = CONFIGS.current_character.get("font", "font3")
-                        
-                        if not compress_layer:
-                                layer_cache.append({"use_cache": True})
-                                compress_layer = True
-                    else:
-                        if not compress_layer:
-                                layer_cache.append({"use_cache": True})
-                                compress_layer = True
+            # 使用预览样式的组件数据
+            components = CONFIGS.get_sorted_preview_components()
             
-            # 使用DLL生成图像，C端会自动缓存
+            if not components:
+                print("警告：没有找到预览组件")
+                return self._create_empty_preview()
+            
+            cp_components = []
+            
+            # 从图层获取当前角色（用于namebox）
+            current_character_name = CONFIGS._get_current_character_from_layers()
+            
+            # 用于收集信息的变量
+            character_info = ""
+            background_info = ""
+
+            # 确定每个组件的具体参数
+            for component in components:
+                if not component.get("enabled", True):
+                    continue
+                
+                ufc = component.get("use_fixed_character", False)
+                ufb = component.get("use_fixed_background", False)
+                comp_type = component.get("type")
+                if use_cache and ((comp_type in ["background", "character"] and (ufc or ufb)) or comp_type not in ["background", "character"]):
+                    if not compress_layer:
+                        cp_components.append({"use_cache": True})
+                        compress_layer = True
+                    continue
+
+                if comp_type == "namebox":
+                    # 添加角色文本配置
+                    if current_character_name in CONFIGS.text_configs_dict:
+                        component["textcfg"] = CONFIGS.text_configs_dict[current_character_name]
+                        component["font_name"] = "font3"  # 使用默认字体
+                        print(f"为namebox添加角色名字配置: {current_character_name}")
+                elif comp_type == "character":
+                    if component.get("use_fixed_character", False):
+                        # 使用固定角色
+                        character_name = component.get("character_name", current_character_name)
+                        emotion_index = component.get("emotion_index")
+                        
+                        # 如果没有指定emotion_index，或者为None，使用随机
+                        if emotion_index is None:
+                            # 在过滤范围内随机选择表情
+                            filter_name = component.get("emotion_filter", "全部")
+                            filtered_emotions = CONFIGS.get_filtered_emotions(character_name, filter_name)
+                            if filtered_emotions:
+                                emotion_index = random.choice(filtered_emotions)
+                            else:
+                                # 如果没有过滤表情，使用所有表情
+                                emotion_count = CONFIGS.mahoshojo.get(character_name, {}).get("emotion_count", 1)
+                                emotion_index = random.randint(1, emotion_count)
+                        else:
+                            # 确保表情索引是整数
+                            emotion_index = int(emotion_index)
+                        
+                        # 收集角色信息
+                        char_full_name = CONFIGS.mahoshojo.get(character_name, {}).get("full_name", character_name)
+                        character_info = f"角色: {char_full_name}, 表情: {emotion_index}"
+                        
+                        # 更新组件的emotion_index
+                        component["emotion_index"] = emotion_index
+                    else:
+                        # 使用随机角色和表情
+                        character_name = current_character_name
+                        
+                        # 在过滤范围内随机选择表情
+                        filter_name = component.get("emotion_filter", "全部")
+                        filtered_emotions = CONFIGS.get_filtered_emotions(character_name, filter_name)
+                        if filtered_emotions:
+                            emotion_index = random.choice(filtered_emotions)
+                        else:
+                            # 如果没有过滤表情，使用所有表情
+                            emotion_count = CONFIGS.mahoshojo.get(character_name, {}).get("emotion_count", 1)
+                            emotion_index = random.randint(1, emotion_count)
+                        
+                        component["character_name"] = character_name
+                        component["emotion_index"] = emotion_index
+                        
+                        # 收集角色信息
+                        char_full_name = CONFIGS.mahoshojo.get(character_name, {}).get("full_name", character_name)
+                        compress_layer = False
+                        character_info = f"角色: {char_full_name}, 表情: 随机({emotion_index})"
+                    
+                    # 获取角色配置
+                    character_config = CONFIGS.mahoshojo.get(character_name, {})
+                    
+                    # 设置缩放
+                    component["scale1"] = float(character_config.get("scale", 1.0))
+                    
+                    # 设置偏移
+                    offset = character_config.get("offset", (0, 0))
+                    offset_x = 0
+                    offset_y = 0
+                    
+                    # 获取表情偏移
+                    emotion_offsets_X = character_config.get("offsetX", {})
+                    emotion_offsets_Y = character_config.get("offsetY", {})
+                    
+                    if emotion_offsets_X and str(emotion_index) in emotion_offsets_X:
+                        offset_x = float(emotion_offsets_X[str(emotion_index)])
+                    if emotion_offsets_Y and str(emotion_index) in emotion_offsets_Y:
+                        offset_y = float(emotion_offsets_Y[str(emotion_index)])
+                    
+                    # 加上基础偏移
+                    if isinstance(offset, (tuple, list)) and len(offset) >= 2:
+                        offset_x += float(offset[0])
+                        offset_y += float(offset[1])
+                    
+                    component["offset_x1"] = offset_x
+                    component["offset_y1"] = offset_y
+                    
+                elif comp_type == "background":
+                    if component.get("use_fixed_background", False):
+                        # 使用固定背景 - 颜色或图片
+                        overlay = component.get("overlay", "")
+                        print(f"背景组件 - 固定背景overlay: {overlay}")
+                        if overlay.startswith("#"):
+                            # 颜色背景
+                            background_info = f"背景: 纯色({overlay})"
+                            # 确保组件包含颜色信息
+                            component["color"] = overlay
+                        elif overlay == "":
+                            # 空背景（透明）
+                            background_info = "背景: 透明"
+                            # 确保overlay是空字符串
+                            component["overlay"] = ""
+                        else:
+                            # 图片背景
+                            background_info = f"背景: 图片({overlay})"
+                            # 确保文件名正确
+                            component["overlay"] = overlay
+                        compress_layer = False
+                    else:
+                        # 随机背景
+                        background_count = CONFIGS.background_count
+                        if background_count > 0:
+                            background_index = random.randint(1, background_count)
+                            overlay = f"c{background_index}"
+                            component["overlay"] = overlay
+                            compress_layer = False
+                            background_info = f"背景: 随机(c{background_index})"
+                        else:
+                            # 没有背景图片
+                            component["overlay"] = ""
+                            background_info = "背景: 无"
+                cp_components.append(component)
+
+            # 如果没有收集到背景信息，说明没有背景组件
+            if not background_info:
+                background_info = "背景: 无"
+            
+            # 如果没有收集到角色信息，说明没有角色组件
+            if not character_info:
+                character_info = "角色: 无"
+            
+            # 使用DLL生成图像
+            print(f"生成预览的组件: {cp_components}")
             preview_image = generate_image_with_dll(
                 self._assets_path,
                 _calculate_canvas_size(),
                 cp_components,
-                character_name,
-                emotion_index,
-                background_index
+                current_character_name,  # 传递当前角色名
+                1,                       # 传递默认表情索引
+                1                        # 传递默认背景索引
             )
             
+            get_enhanced_loader().layer_cache = True
+
             if preview_image:
                 print(f"预览生成用时: {int((time.time()-st)*1000)}ms")
+                info = f"{character_info} | {background_info} | 生成成功"
             else:
                 print("预览图生成失败，使用默认图片")
                 preview_image = Image.new("RGBA", _calculate_canvas_size(), (0, 0, 0, 0))
+                info = f"{character_info} | {background_info} | 生成失败"
                 
         except Exception as e:
             print(f"预览图生成出错: {e}")
+            import traceback
+            traceback.print_exc()
             preview_image = Image.new("RGBA", _calculate_canvas_size(), color=(0, 0, 0, 0))
-
-        # 构建预览信息 - 显示实际使用的索引值
-        info = f"角色: {character_name}\n表情: {emotion_index:02d}\n背景: {background_index:02d}"
+            info = f"错误: {str(e)}"
+        
+        return preview_image, info
+    
+    def _create_empty_preview(self):
+        """创建空的预览图像"""
+        canvas_size = _calculate_canvas_size()
+        preview_image = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
+        info = "没有找到组件配置"
         return preview_image, info
 
     def generate_image(self) -> str:

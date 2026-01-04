@@ -1,566 +1,496 @@
-"""魔裁文本框 GUI 版本"""
+# gui.py - 修改后的主程序
+"""PyQt 版本主程序入口"""
 
-import tkinter as tk
-from tkinter import ttk
+import sys
+import os
+from PySide6.QtWidgets import QApplication, QMainWindow, QGraphicsScene, QGraphicsPixmapItem, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox, QComboBox, QGroupBox, QTabWidget, QScrollArea, QSizePolicy, QSpacerItem, QLineEdit
+from PySide6.QtCore import Qt, QTimer, QPoint, QMetaObject, Slot, Q_ARG
+from PySide6.QtGui import QImage, QPixmap
 import threading
+import traceback
 
+from ui_pyqt_main import Ui_MainWindow
 from core import ManosabaCore
-from gui_settings import SettingsWindow
-from gui_style import StyleWindow
-from gui_about import AboutWindow
-from gui_hotkeys import HotkeyManager
-from gui_components import PreviewManager, StatusManager
 from config import CONFIGS
+from pyqt_tabs import CharacterTabWidget, BackgroundTabWidget
 
-class ManosabaGUI:
-    """魔裁文本框 GUI"""
 
+class ManosabaMainWindow(QMainWindow):
+    """魔裁文本框 PyQt 主窗口"""
+      
     def __init__(self):
+        super().__init__()
+        
+        # 设置UI
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
+        
+        # 存储角色和背景标签页引用
+        self.character_tabs = []
+        self.background_tab = None
+        
+        # 初始化核心
         self.core = ManosabaCore()
-        # 设置GUI回调
         self.core.set_gui_callback(self._on_sentiment_analyzer_status_changed)
-        # 设置状态更新回调
         self.core.set_status_callback(self.update_status)
-
-        self.root = tk.Tk()
-        self.root.title("魔裁文本框生成器")
-        self.root.geometry("700x650")
-
-        # 添加图标
-        from path_utils import set_window_icon
-        set_window_icon(self.root)
-            
-        # 初始化管理器
-        self.hotkey_manager = HotkeyManager(self)
-        self.preview_manager = PreviewManager(self)
-        self.status_manager = StatusManager(self)
-        self.about_window = None  # 关于窗口实例
-        self.style_window = None  # 样式窗口实例
-
+        
         # 图片生成状态
         self.is_generating = False
-
-        self._setup_gui()
-        self.root.bind("<Configure>", self._on_window_resize)
-
-        self.hotkey_manager.setup_hotkeys()
-
-        # 根据初始状态设置按钮可用性
-        self._update_sentiment_button_state()
-
-        # 根据随机表情状态设置情感筛选下拉框状态
-        if self.emotion_random_var.get():
-            self.sentiment_filter_combo.config(state="disabled")
-        else:
-            self.sentiment_filter_combo.config(state="readonly")
         
-        self.update_preview()
-        self._update_sentiment_filter_combo()
+        # 预览图缩放相关
+        self.zoom_level = 1.0
+        self.last_mouse_pos = None
+        self.is_dragging = False
+        
+        # 初始化界面
+        self._setup_ui()
+        
+        # 连接信号槽
+        self._connect_signals()
+        
+        # 初始化数据
+        self._init_data()
+        
+        # 添加防抖定时器
+        self._preview_update_timer = QTimer()
+        self._preview_update_timer.setSingleShot(True)
+        self._preview_update_timer.timeout.connect(self._delayed_update_preview)
+        
+        # 初始预览
+        QTimer.singleShot(100, self.update_preview)
+
+    def _setup_ui(self):
+        """设置UI界面"""
+        # 设置窗口标题
+        self.setWindowTitle("魔裁文本框生成器")
+        
+        # 初始化样式选择下拉框
+        self._init_style_combo()
+        
+        # 初始化角色和背景标签页
+        self._init_components_tabs()
+        
+        # 设置预览区域支持鼠标交互
+        self._setup_preview_interaction()
+        
+        # 初始化设置
+        self._init_settings()
+        
+        # 调整预览区域大小
+        self._adjust_preview_size()
     
-    def _setup_gui(self):
-        """设置 GUI 界面"""
-        # 创建菜单栏
-        self._setup_menu()
-
-        # 主框架
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-
-        # 角色选择
-        ttk.Label(main_frame, text="选择角色:").grid(
-            row=0, column=0, sticky=tk.W, pady=5
-        )
-        self.character_var = tk.StringVar()
-        character_combo = ttk.Combobox(
-            main_frame, textvariable=self.character_var, state="readonly", width=30
-        )
-        character_combo["values"] = [
-            f"{CONFIGS.get_character(char_id, full_name=True)} ({char_id})"
-            for char_id in CONFIGS.character_list
-        ]
-        character_combo.set(
-            f"{CONFIGS.get_character(full_name=True)} ({CONFIGS.get_character()})"
-        )
-        character_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5, padx=5)
-        character_combo.bind("<<ComboboxSelected>>", self.on_character_changed)
-
-        # 表情选择框架
-        emotion_frame = ttk.LabelFrame(main_frame, text="表情选择", padding="5")
-        emotion_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-
-        # 表情随机选择
-        self.emotion_random_var = tk.BooleanVar(value=True)
-        emotion_random_cb = ttk.Checkbutton(
-            emotion_frame,
-            text="随机表情",
-            variable=self.emotion_random_var,
-            command=self.on_emotion_random_changed,
-        )
-        emotion_random_cb.grid(row=0, column=0, sticky=tk.W, padx=5)
-
-        # 情感筛选下拉框（新增）
-        ttk.Label(emotion_frame, text="表情筛选:").grid(
-            row=0, column=1, sticky=tk.W, padx=5
-        )
-        self.sentiment_filter_var = tk.StringVar()
-        self.sentiment_filter_combo = ttk.Combobox(
-            emotion_frame, textvariable=self.sentiment_filter_var, state="readonly", width=15
-        )
-        self.sentiment_filter_combo.grid(row=0, column=2, sticky=(tk.W, tk.E), padx=5)
-        self.sentiment_filter_combo.bind("<<ComboboxSelected>>", self._on_sentiment_filter_changed)
+    def _init_components_tabs(self):
+        """初始化组件标签页"""
+        # 清除现有标签页（除了背景标签页）
+        while self.ui.tabWidget_Layer.count() > 1:
+            widget = self.ui.tabWidget_Layer.widget(1)
+            if widget:
+                widget.deleteLater()
+            self.ui.tabWidget_Layer.removeTab(1)
         
-        # 表情下拉框
-        ttk.Label(emotion_frame, text="指定表情:").grid(
-            row=0, column=3, sticky=tk.W, padx=5
-        )
-        self.emotion_var = tk.StringVar()
-        self.emotion_combo = ttk.Combobox(
-            emotion_frame, textvariable=self.emotion_var, state="readonly", width=15
-        )
-        emotion_count = CONFIGS.current_character["emotion_count"]
-        self.emotion_combo["values"] = [
-            f"表情 {i}" for i in range(1, emotion_count + 1)
-        ]
-        self.emotion_combo.set("表情 1")
-        self.emotion_combo.grid(row=0, column=4, sticky=(tk.W, tk.E), padx=5)
-        self.emotion_combo.bind("<<ComboboxSelected>>", self._on_emotion_changed)
-        self.emotion_combo.config(state="disabled")
-
-        # 配置列权重
-        emotion_frame.columnconfigure(2, weight=1)
-        emotion_frame.columnconfigure(4, weight=1)
-
-        # 背景选择框架
-        background_frame = ttk.LabelFrame(main_frame, text="背景选择", padding="5")
-        background_frame.grid(
-            row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5
-        )
-
-        # 背景随机选择
-        self.background_random_var = tk.BooleanVar(value=True)
-        background_random_cb = ttk.Checkbutton(
-            background_frame,
-            text="随机背景",
-            variable=self.background_random_var,
-            command=self.on_background_random_changed,
-        )
-        background_random_cb.grid(row=0, column=0, sticky=tk.W, padx=5)
-
-        # 背景下拉框
-        ttk.Label(background_frame, text="指定背景:").grid(
-            row=0, column=1, sticky=tk.W, padx=5
-        )
-        self.background_var = tk.StringVar()
-        self.background_combo = ttk.Combobox(
-            background_frame,
-            textvariable=self.background_var,
-            state="readonly",
-            width=15,
-        )
-        background_count = CONFIGS.background_count
-        self.background_combo["values"] = [
-            f"背景 {i}" for i in range(1, background_count + 1)
-        ]
-        self.background_combo.set("背景 1")
-        self.background_combo.grid(row=0, column=2, sticky=(tk.W, tk.E), padx=5)
-        self.background_combo.bind("<<ComboboxSelected>>", self._on_background_changed)
-        self.background_combo.config(state="disabled")
-
-        background_frame.columnconfigure(2, weight=1)
-
-        # 设置框架
-        settings_frame = ttk.LabelFrame(main_frame, text="设置", padding="5")
-        settings_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-
-        self.auto_paste_var = tk.BooleanVar(value=CONFIGS.config.AUTO_PASTE_IMAGE)
-        ttk.Checkbutton(
-            settings_frame,
-            text="自动粘贴",
-            variable=self.auto_paste_var,
-            command=self._on_auto_paste_changed,
-        ).grid(row=0, column=0, sticky=tk.W, padx=5)
-
-        self.auto_send_var = tk.BooleanVar(value=CONFIGS.config.AUTO_SEND_IMAGE)
-        ttk.Checkbutton(
-            settings_frame,
-            text="自动发送",
-            variable=self.auto_send_var,
-            command=self._on_auto_send_changed,
-        ).grid(row=0, column=1, sticky=tk.W, padx=5)
-
-        # 只在 display 为 True 时显示情感匹配按钮
-        sentiment_settings = CONFIGS.gui_settings.get("sentiment_matching", {})
-        if sentiment_settings.get("display", False):
-            self.sentiment_matching_var = tk.BooleanVar(value=sentiment_settings.get("enabled", False))
-            self.sentiment_checkbutton = ttk.Checkbutton(
-                settings_frame,
-                text="情感匹配",
-                variable=self.sentiment_matching_var,
-                command=self.on_sentiment_matching_changed,
-            )
-            self.sentiment_checkbutton.grid(row=0, column=2, sticky=tk.W, padx=5)
-            
-        # 根据初始状态设置按钮可用性
-        self._update_sentiment_button_state()
-
-        # 预览框架
-        preview_frame = ttk.LabelFrame(main_frame, text="图片预览", padding="5")
-        preview_frame.grid(
-            row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5
-        )
-
-        # 使用预览管理器设置预览界面
-        self.preview_manager.setup_preview_frame(preview_frame)
-
-        # 按钮框架
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=5, column=0, columnspan=2, pady=10)
-
-        # 状态栏
-        self.status_manager.setup_status_bar(main_frame, 6)
-
-        # 配置网格权重
-        main_frame.columnconfigure(1, weight=1)
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(1, weight=1)
-        main_frame.rowconfigure(4, weight=1)
-
-        # self.update_preview()
-        self._update_sentiment_filter_combo()
-
-    def _setup_menu(self):
-        """设置菜单栏"""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-
-        menubar.add_command(label="设置", command=self._open_settings)
-        menubar.add_command(label="样式", command=self._open_style)
-        menubar.add_command(label="关于", command=self._open_about)
-
-    def _open_style(self):
-        """打开样式编辑窗口"""
-        # 打开样式窗口
-        self.style_window = StyleWindow(self.root, self.core, self)
-
-    def _open_about(self):
-        """打开关于窗口"""
-        if not self.about_window:
-            self.about_window = AboutWindow(self.root)
-        self.about_window.open()
-
-    def _open_settings(self):
-        """打开设置窗口"""
-        # 停止热键监听
-        self.hotkey_manager.stop_hotkey_listener()
+        # 清空标签页引用
+        self.character_tabs.clear()
+        self.background_tab = None
         
-        # 打开设置窗口
-        settings_window = SettingsWindow(self.root, self.core, self)
+        # 获取预览样式的组件
+        sorted_components = CONFIGS.get_sorted_preview_components()
         
-        # 设置窗口关闭时的回调
-        self.root.wait_window(settings_window.window)
-        
-        # 设置窗口关闭后重新启动热键监听
-        self.hotkey_manager.setup_hotkeys()
-
-    def _on_window_resize(self, event):
-        """处理窗口大小变化事件 - 调整大小并刷新内容"""
-        if event.widget == self.root:
-            self.preview_manager.handle_window_resize(event)
-
-    def update_preview(self):
-        """更新预览"""
-        self.preview_manager.update_preview()
-
-    def _update_sentiment_filter_combo(self):
-        """更新情感筛选下拉框的选项"""
-        character_name = CONFIGS.get_character()
-        character_meta = CONFIGS.mahoshojo.get(character_name, {})
-        
-        # 获取所有可用的情感列表
-        available_sentiments = ["全部表情"]
-        
-        for sentiment in CONFIGS.emotion_list:
-            # 检查该情感是否有对应的表情索引
-            emotion_indices = character_meta.get(sentiment, [])
-            if emotion_indices:  # 只有有可用表情的情感才添加
-                available_sentiments.append(sentiment)
-        
-        # 更新下拉框选项
-        self.sentiment_filter_combo["values"] = available_sentiments
-        
-        # 根据随机表情状态设置下拉框状态
-        if self.emotion_random_var.get():
-            self.sentiment_filter_combo.config(state="disabled")
-        else:
-            self.sentiment_filter_combo.config(state="readonly")
-        
-        # 设置默认值
-        self.sentiment_filter_combo.set("全部表情")
-
-    def _on_sentiment_filter_changed(self, event=None):
-        """情感筛选改变事件"""
-        # 如果随机表情启用，则不执行筛选
-        if self.emotion_random_var.get():
+        if not sorted_components:
+            print("警告：没有找到预览样式的组件")
             return
         
-        selected_sentiment = self.sentiment_filter_var.get()
-        character_name = CONFIGS.get_character()
-        character_meta = CONFIGS.mahoshojo.get(character_name, {})
+        # 分离背景组件和角色组件
+        background_components = [c for c in sorted_components if c.get("type") == "background"]
+        character_components = [c for c in sorted_components if c.get("type") == "character"]
         
-        if selected_sentiment == "全部表情":
-            # 显示所有表情
-            emotion_count = CONFIGS.current_character["emotion_count"]
-            self.emotion_combo["values"] = [
-                f"表情 {i}" for i in range(1, emotion_count + 1)
-            ]
-        else:
-            # 获取该情感对应的表情索引列表
-            emotion_indices = character_meta.get(selected_sentiment, [])
-            if emotion_indices:
-                # 更新表情下拉框为可用表情
-                self.emotion_combo["values"] = [
-                    f"表情 {i}" for i in emotion_indices
-                ]
-            else:
-                # 如果没有可用表情，清空下拉框
-                self.emotion_combo["values"] = []
-        
-        # 如果有选项，设置第一个为默认
-        if self.emotion_combo["values"]:
-            self.emotion_combo.set(self.emotion_combo["values"][0])
-            if not self.emotion_random_var.get():  # 只有在非随机模式下才更新选中
-                try:
-                    emotion_index = int(self.emotion_combo.get().split()[-1])
-                    CONFIGS.selected_emotion = emotion_index
-                except (ValueError, IndexError):
-                    CONFIGS.selected_emotion = None
-        else:
-            self.emotion_combo.set("")
-            CONFIGS.selected_emotion = None
-        
-        # 更新预览
-        self.update_preview()
-
-    def on_character_changed(self, event=None):
-        """角色改变事件"""
-        selected_text = self.character_var.get()
-        char_id = selected_text.split("(")[-1].rstrip(")")
-
-        # 更新核心角色
-        char_idx = CONFIGS.character_list.index(char_id) + 1
-        self.core.switch_character(char_idx)
-
-        # 更新情感筛选下拉框
-        self._update_sentiment_filter_combo()
-        
-        # 先获取当前角色的表情数量
-        emotion_count = CONFIGS.current_character["emotion_count"]
-        
-        # 更新表情选项（先使用全部表情）
-        self.sentiment_filter_combo.set("全部表情")
-        
-        # 根据随机表情状态决定是否执行筛选
-        if self.emotion_random_var.get():
-            # 随机表情启用时，更新表情下拉框的选项为所有表情
-            self.emotion_combo["values"] = [
-                f"表情 {i}" for i in range(1, emotion_count + 1)
-            ]
-            # 设置默认值为第一个表情
-            if emotion_count > 0:
-                self.emotion_combo.set("表情 1")
-            else:
-                self.emotion_combo.set("")
-                
-            # 禁用下拉框（因为随机表情启用）
-            self.emotion_combo.config(state="disabled")
-            self.sentiment_filter_combo.config(state="disabled")
-            CONFIGS.selected_emotion = None
-        else:
-            # 随机表情未启用时，启用下拉框并更新选项
-            self.emotion_combo.config(state="readonly")
-            self.sentiment_filter_combo.config(state="readonly")
+        # 设置背景标签页（第一个标签页）
+        if background_components and self.ui.tabWidget_Layer.count() > 0:
+            bg_component = background_components[0]
+            bg_layer = bg_component.get("layer", 0)
             
-            # 这会自动更新表情下拉框
-            self._on_sentiment_filter_changed()
-
-        # 重置背景选择为随机
-        if self.background_random_var.get():
-            self.background_combo.config(state="disabled")
-            CONFIGS.selected_background = None
-        else:
-            self.background_combo.config(state="readonly")
-            if self.background_combo["values"]:
-                self.background_combo.set(self.background_combo["values"][0])
-                background_index = int(self.background_combo.get().split()[-1])
-                CONFIGS.selected_background = background_index
-
-        # 标记需要更新预览内容
-        self.update_preview()
-        # self.update_status(f"已切换到角色: {CONFIGS.get_character(full_name=True)}")
-
-    def on_emotion_random_changed(self):
-        """表情随机选择改变"""
-        if self.emotion_random_var.get():
-            # 启用随机表情时，禁用表情下拉框和情感筛选下拉框
-            self.emotion_combo.config(state="disabled")
-            self.sentiment_filter_combo.config(state="disabled")
-            CONFIGS.selected_emotion = None
-        else:
-            # 禁用随机表情时，启用表情下拉框和情感筛选下拉框
-            self.emotion_combo.config(state="readonly")
-            self.sentiment_filter_combo.config(state="readonly")
+            # 准备UI控件
+            ui_controls = {
+                'checkBox_randomBg': self.ui.checkBox_randomBg,
+                'comboBox_bgSelect': self.ui.comboBox_bgSelect,
+                'lineEdit_bgColor': self.ui.lineEdit,
+                'widget_bgColorPreview': self.ui.widget_bgColorPreview
+            }
             
-            # 更新表情选择
-            emotion_value = self.emotion_combo.get()
-            if emotion_value:
-                try:
-                    emotion_index = int(emotion_value.split()[-1])
-                    CONFIGS.selected_emotion = emotion_index
-                except (ValueError, IndexError):
-                    CONFIGS.selected_emotion = None
-            else:
-                CONFIGS.selected_emotion = None
-
-        self.update_preview()
-
-    def _on_emotion_changed(self, event=None):
-        """表情改变事件"""
-        # 取消情感匹配勾选
-        if CONFIGS.gui_settings["sentiment_matching"].get("display", False) and self.sentiment_matching_var.get():
-            self.sentiment_matching_var.set(False)
-            self.on_sentiment_matching_changed()
-            self.update_status("已取消情感匹配（手动选择表情）")
-
-        if not self.emotion_random_var.get():
-            emotion_value = self.emotion_var.get()
-            if emotion_value:
-                try:
-                    emotion_index = int(emotion_value.split()[-1])
-                    CONFIGS.selected_emotion = emotion_index
-                    self.update_preview()
-                except (ValueError, IndexError):
-                    CONFIGS.selected_emotion = None
-                    self.update_status("表情选择无效")
-
-    def on_background_random_changed(self):
-        """背景随机选择改变"""
-        if self.background_random_var.get():
-            self.background_combo.config(state="disabled")
-            CONFIGS.selected_background = None
-        else:
-            self.background_combo.config(state="readonly")
-            background_value = self.background_combo.get()
-            if background_value:
-                background_index = int(background_value.split()[-1])
-                CONFIGS.selected_background = background_index
-
-        self.update_preview()
-
-    def _on_background_changed(self, event=None):
-        """背景改变事件"""
-        if not self.background_random_var.get():
-            background_value = self.background_var.get()
-            if background_value:
-                background_index = int(background_value.split()[-1])
-                CONFIGS.selected_background = background_index
-                self.update_preview()
-
-    def _on_auto_paste_changed(self):
-        """自动粘贴设置改变"""
-        CONFIGS.config.AUTO_PASTE_IMAGE = self.auto_paste_var.get()
-
-    def _on_auto_send_changed(self):
-        """自动发送设置改变"""
-        CONFIGS.config.AUTO_SEND_IMAGE = self.auto_send_var.get()
-
-    def _on_sentiment_analyzer_status_changed(self, initialized: bool, enabled: bool, initializing: bool = False):
-        """情感分析器状态变化回调"""
-        def update_ui():
-            if initializing:
-                # 正在初始化，禁用复选框
-                self.sentiment_checkbutton.config(state="disabled")
-                self.sentiment_matching_var.set(True)  # 初始化期间保持选中状态
-                self.update_status("正在初始化情感分析器...")
-            else:
-                # 初始化完成，启用复选框
-                self.sentiment_checkbutton.config(state="normal")
-                self.sentiment_matching_var.set(enabled)
-                if enabled:
-                    self.update_status("情感匹配功能已启用")
-                else:
-                    self.update_status("情感匹配功能已禁用")
-                    if self.emotion_random_var.get():
-                        CONFIGS.selected_emotion = None
-                    else:
-                        CONFIGS.selected_emotion = int(self.emotion_combo.get().split()[-1])
+            # 创建背景标签页管理器
+            self.background_tab = BackgroundTabWidget(
+                self, 
+                component_config=bg_component,
+                layer_index=bg_layer,
+                ui_controls=ui_controls
+            )
+            self.background_tab.config_changed.connect(self._on_component_config_changed)
+            
+            # 更新标签页标题
+            tab_name = bg_component.get("name", "背景")
+            self.ui.tabWidget_Layer.setTabText(0, tab_name)
         
-        # 在UI线程中执行更新
-        self.root.after(0, update_ui)
-
+        # 为每个角色组件创建标签页
+        for component in character_components:
+            layer_index = component.get("layer", 0)
+            
+            # 创建角色标签页
+            tab = CharacterTabWidget(self, component_config=component, layer_index=layer_index)
+            tab.config_changed.connect(self._on_component_config_changed)
+            
+            # 使用组件名、角色名或默认名称
+            if "name" in component:
+                tab_name = component["name"]
+            elif "character_name" in component:
+                char_id = component["character_name"]
+                full_name = CONFIGS.get_character(char_id, full_name=True)
+                tab_name = f"{full_name}"
+            else:
+                tab_name = f"角色 {layer_index}"
+            
+            self.ui.tabWidget_Layer.addTab(tab, tab_name)
+            self.character_tabs.append(tab)
+    
+    def _on_component_config_changed(self):
+        """组件配置改变事件 - 添加防抖"""
+        # 取消之前的定时器
+        self._preview_update_timer.stop()
+        # 重新启动定时器，延迟300ms更新预览
+        self._preview_update_timer.start(300)
+    
+    def _init_style_combo(self):
+        """初始化样式选择下拉框"""
+        available_styles = list(CONFIGS.style_configs.keys())
+        self.ui.comboBox_StyleSelect.clear()
+        self.ui.comboBox_StyleSelect.addItems(available_styles)
+        
+        # 设置当前样式
+        current_style = CONFIGS.current_style
+        index = self.ui.comboBox_StyleSelect.findText(current_style)
+        if index >= 0:
+            self.ui.comboBox_StyleSelect.setCurrentIndex(index)
+    
+    def _setup_preview_interaction(self):
+        """设置预览区域鼠标交互"""
+        # 启用鼠标跟踪
+        self.ui.PreviewImg.setMouseTracking(True)
+        
+        # 设置拖动模式为手形拖动
+        self.ui.PreviewImg.setDragMode(self.ui.PreviewImg.DragMode.ScrollHandDrag)
+        
+        # 设置接受滚轮事件
+        self.ui.PreviewImg.viewport().installEventFilter(self)
+        
+        # 创建场景
+        scene = QGraphicsScene()
+        self.ui.PreviewImg.setScene(scene)
+        
+        # 连接鼠标事件
+        self.ui.PreviewImg.mousePressEvent = self._preview_mouse_press
+        self.ui.PreviewImg.mouseMoveEvent = self._preview_mouse_move
+        self.ui.PreviewImg.mouseReleaseEvent = self._preview_mouse_release
+        self.ui.PreviewImg.wheelEvent = self._preview_wheel
+    
+    def _adjust_preview_size(self):
+        """调整预览区域大小"""
+        # 设置预览视图的策略，使其可以扩展
+        self.ui.PreviewImg.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # 设置滚动区域策略
+        self.ui.scrollArea.setWidgetResizable(True)
+        
+        # 调整预览图大小以适应窗口
+        self.ui.scrollAreaWidgetContents.setMinimumHeight(400)
+    
+    def _init_settings(self):
+        """初始化设置"""
+        # 自动粘贴和自动发送
+        self.ui.checkBox_AutoPaste.setChecked(CONFIGS.config.AUTO_PASTE_IMAGE)
+        self.ui.checkBox_AutoSend.setChecked(CONFIGS.config.AUTO_SEND_IMAGE)
+        
+        # 情感匹配
+        sentiment_settings = CONFIGS.gui_settings.get("sentiment_matching", {})
+        if sentiment_settings.get("display", False):
+            self.ui.checkBox_EmoMatch.setChecked(sentiment_settings.get("enabled", False))
+        else:
+            self.ui.checkBox_EmoMatch.hide()
+    
+    def _connect_signals(self):
+        """连接信号槽"""
+        # 样式选择
+        self.ui.comboBox_StyleSelect.currentIndexChanged.connect(self.on_style_changed)
+        
+        # 设置相关
+        self.ui.checkBox_AutoPaste.toggled.connect(self.on_auto_paste_changed)
+        self.ui.checkBox_AutoSend.toggled.connect(self.on_auto_send_changed)
+        self.ui.checkBox_EmoMatch.toggled.connect(self.on_sentiment_matching_changed)
+        
+        # 按钮
+        self.ui.Button_RefreshPreview.clicked.connect(self.update_preview)
+        
+        # 菜单栏
+        self.ui.menu_setting.triggered.connect(self._open_settings)
+        self.ui.menu_style.triggered.connect(self._open_style)
+        self.ui.menu_about.triggered.connect(self._open_about)
+    
+    def _init_data(self):
+        """初始化数据"""
+        # 更新情感分析器按钮状态
+        self._update_sentiment_button_state()
+        
+        # 更新状态
+        self.update_status("就绪")
+    
     def _update_sentiment_button_state(self):
         """更新情感匹配按钮状态"""
-        # 根据当前状态设置复选框状态
         sentiment_settings = CONFIGS.gui_settings.get("sentiment_matching", {})
         if not sentiment_settings.get("display", False):
             return
-
-        current_enabled = sentiment_settings.get("enabled", False)
         
         if self.core.sentiment_analyzer_status['initializing']:
-            # 正在初始化，禁用复选框
-            self.sentiment_checkbutton.config(state="disabled")
-            self.sentiment_matching_var.set(True)
+            self.ui.checkBox_EmoMatch.setEnabled(False)
+            self.ui.checkBox_EmoMatch.setChecked(True)
         elif self.core.sentiment_analyzer_status['initialized']:
-            # 初始化成功，启用复选框
-            self.sentiment_checkbutton.config(state="normal")
-            self.sentiment_matching_var.set(current_enabled)
+            self.ui.checkBox_EmoMatch.setEnabled(True)
+            self.ui.checkBox_EmoMatch.setChecked(sentiment_settings.get("enabled", False))
         else:
-            # 未初始化，启用复选框但状态为未选中
-            self.sentiment_checkbutton.config(state="normal")
-            self.sentiment_matching_var.set(False)
-
+            self.ui.checkBox_EmoMatch.setEnabled(True)
+            self.ui.checkBox_EmoMatch.setChecked(False)
+    
+    def on_style_changed(self, index):
+        """样式改变事件"""
+        if index < 0:
+            return
+        
+        style_name = self.ui.comboBox_StyleSelect.currentText()
+        if style_name in CONFIGS.style_configs:
+            # 应用新样式
+            CONFIGS.apply_style(style_name)
+            
+            # 重新初始化组件标签页
+            self._init_components_tabs()
+            
+            # 更新预览
+            self.update_preview()
+            self.update_status(f"已切换到样式: {style_name}")
+    
+    def on_auto_paste_changed(self, checked):
+        """自动粘贴设置改变"""
+        CONFIGS.config.AUTO_PASTE_IMAGE = checked
+    
+    def on_auto_send_changed(self, checked):
+        """自动发送设置改变"""
+        CONFIGS.config.AUTO_SEND_IMAGE = checked
+    
     def on_sentiment_matching_changed(self):
         """情感匹配设置改变"""
-        # 调用core的切换方法
         self.core.toggle_sentiment_matching()
+    
+    def _on_sentiment_analyzer_status_changed(self, initialized, enabled, initializing=False):
+        """情感分析器状态变化回调"""
+        # 使用 QMetaObject.invokeMethod 在主线程中更新UI
+        if initializing:
+            QMetaObject.invokeMethod(self, "_update_sentiment_ui_initializing", 
+                                    Qt.ConnectionType.QueuedConnection)
+        else:
+            QMetaObject.invokeMethod(self, "_update_sentiment_ui", 
+                                    Qt.ConnectionType.QueuedConnection,
+                                    Q_ARG(bool, enabled))
+    
+    @Slot()
+    def _update_sentiment_ui_initializing(self):
+        """在主线程中更新情感匹配UI（初始化中）"""
+        self.ui.checkBox_EmoMatch.setEnabled(False)
+        self.ui.checkBox_EmoMatch.setChecked(True)
+        self.update_status("正在初始化情感分析器...")
+    
+    @Slot(bool)
+    def _update_sentiment_ui(self, enabled):
+        """在主线程中更新情感匹配UI"""
+        self.ui.checkBox_EmoMatch.setEnabled(True)
+        self.ui.checkBox_EmoMatch.setChecked(enabled)
+        if enabled:
+            self.update_status("情感匹配功能已启用")
+        else:
+            self.update_status("情感匹配功能已禁用")
+        
+    def _delayed_update_preview(self):
+        """延迟更新预览"""
+        self.update_preview()
+        self.update_status("组件配置已更新")
 
+    def update_preview(self):
+        """更新预览"""
+        # 确保没有重复调用
+        if self._preview_update_timer.isActive():
+            return
+            
+        try:
+            preview_image, info = self.core.generate_preview()
+            self._update_preview_ui(preview_image, info)
+        except Exception as e:
+            error_msg = f"预览生成失败: {str(e)}"
+            print(traceback.format_exc())
+            self.update_status(error_msg)
+
+    def _update_preview_ui(self, preview_image, info):
+        """更新预览UI"""
+        try:
+            # 转换PIL图像为QPixmap
+            if preview_image.mode == "RGBA":
+                # RGBA图像
+                image = QImage(preview_image.tobytes(), preview_image.width, 
+                            preview_image.height, QImage.Format.Format_RGBA8888)
+            else:
+                # RGB图像
+                preview_image = preview_image.convert("RGB")
+                image = QImage(preview_image.tobytes(), preview_image.width,
+                            preview_image.height, QImage.Format.Format_RGB888)
+            
+            pixmap = QPixmap.fromImage(image)
+            
+            # 设置到QGraphicsView中
+            scene = self.ui.PreviewImg.scene()
+            if scene is None:
+                scene = QGraphicsScene()
+                self.ui.PreviewImg.setScene(scene)
+            
+            # 清除现有内容
+            scene.clear()
+            
+            # 添加图片
+            pixmap_item = QGraphicsPixmapItem(pixmap)
+            scene.addItem(pixmap_item)
+            scene.setSceneRect(pixmap.rect())
+            
+            # 调整视图以适应图片
+            self.ui.PreviewImg.fitInView(pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
+            
+            # 更新预览信息
+            info_parts = info.split("\n")
+            if len(info_parts) >= 3:
+                info_text = f"{info_parts[0]} | {info_parts[1]} | {info_parts[2]}"
+                self.ui.label_PreviewInfo.setText(info_text)
+            else:
+                self.ui.label_PreviewInfo.setText(info)
+            
+        except Exception as e:
+            self.update_status(f"预览更新失败: {str(e)}")
+            print(traceback.format_exc())
+    
     def generate_image(self):
         """生成图片"""
         if self.is_generating:
             return
         
-        # 设置生成状态
         self.is_generating = True
-        self.status_manager.update_status("正在生成图片...")
-
+        self.update_status("正在生成图片...")
+        
         def generate_in_thread():
             try:
                 result = self.core.generate_image()
-                self.root.after(0, lambda: self._on_generation_complete(result))
+                QMetaObject.invokeMethod(self, "_on_generation_complete", 
+                                        Qt.ConnectionType.QueuedConnection,
+                                        Q_ARG(str, result))
             except Exception as e:
                 error_msg = f"生成失败: {str(e)}"
-                print(error_msg)
-                self.root.after(0, lambda: self._on_generation_complete(error_msg))
+                print(traceback.format_exc())
+                QMetaObject.invokeMethod(self, "_on_generation_complete", 
+                                        Qt.ConnectionType.QueuedConnection,
+                                        Q_ARG(str, error_msg))
             finally:
                 self.is_generating = False
-        thread = threading.Thread(target=generate_in_thread, daemon=True, name="GenerateImg")
+        
+        thread = threading.Thread(target=generate_in_thread, daemon=True)
         thread.start()
-
+    
+    @Slot(str)
     def _on_generation_complete(self, result):
         """生成完成后的回调函数"""
-        self.status_manager.update_status(result)
+        self.update_status(result)
         self.update_preview()
-
-    def update_status(self, message: str):
+    
+    @Slot(str)
+    def update_status(self, message):
         """更新状态栏"""
-        if hasattr(self,"status_manager"):
-            self.status_manager.update_status(message)  
+        self.ui.statusbar.showMessage(message, 5000)  # 显示5秒
+    
+    # 预览图鼠标交互功能
+    def _preview_mouse_press(self, event):
+        """预览图鼠标按下事件"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.last_mouse_pos = event.pos()
+            self.is_dragging = True
+            event.accept()
+        else:
+            # 调用父类方法处理其他鼠标按钮
+            self.ui.PreviewImg.__class__.mousePressEvent(self.ui.PreviewImg, event)
+    
+    def _preview_mouse_move(self, event):
+        """预览图鼠标移动事件"""
+        if self.is_dragging and self.last_mouse_pos is not None:
+            delta = event.pos() - self.last_mouse_pos
+            self.last_mouse_pos = event.pos()
+            
+            # 滚动视图
+            h_scroll = self.ui.PreviewImg.horizontalScrollBar()
+            v_scroll = self.ui.PreviewImg.verticalScrollBar()
+            h_scroll.setValue(h_scroll.value() - delta.x())
+            v_scroll.setValue(v_scroll.value() - delta.y())
+            event.accept()
+        else:
+            # 调用父类方法
+            self.ui.PreviewImg.__class__.mouseMoveEvent(self.ui.PreviewImg, event)
+    
+    def _preview_mouse_release(self, event):
+        """预览图鼠标释放事件"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.is_dragging = False
+            self.last_mouse_pos = None
+            event.accept()
+        else:
+            # 调用父类方法
+            self.ui.PreviewImg.__class__.mouseReleaseEvent(self.ui.PreviewImg, event)
+    
+    def _preview_wheel(self, event):
+        """预览图滚轮事件 - 缩放"""
+        zoom_factor = 1.15
+        if event.angleDelta().y() > 0:
+            # 放大
+            self.zoom_level *= zoom_factor
+            self.ui.PreviewImg.scale(zoom_factor, zoom_factor)
+        else:
+            # 缩小
+            self.zoom_level /= zoom_factor
+            self.ui.PreviewImg.scale(1/zoom_factor, 1/zoom_factor)
+        event.accept()
+    
+    def _open_settings(self):
+        """打开设置窗口"""
+        # TODO: 实现设置窗口
+        self.update_status("设置窗口功能待实现")
+    
+    def _open_style(self):
+        """打开样式窗口"""
+        # TODO: 实现样式窗口
+        self.update_status("样式窗口功能待实现")
+    
+    def _open_about(self):
+        """打开关于窗口"""
+        # TODO: 实现关于窗口
+        self.update_status("关于窗口功能待实现")
 
-    def run(self):
-        """运行 GUI"""
-        self.root.mainloop()
-
+def main():
+    """主函数"""
+    app = QApplication(sys.argv)
+    
+    # 创建主窗口
+    main_window = ManosabaMainWindow()
+    
+    # 显示窗口
+    main_window.show()
+    
+    # 运行应用
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
-    app = ManosabaGUI()
-    app.run()
+    main()

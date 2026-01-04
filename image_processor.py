@@ -30,7 +30,7 @@ class EnhancedImageLoaderDLL:
         except OSError as e:
             raise OSError(f"加载DLL失败: {e}")
         
-        self.layer_cache = []
+        self.layer_cache = False
     
     def _define_function_signatures(self):
         """定义DLL函数签名"""
@@ -97,7 +97,7 @@ class EnhancedImageLoaderDLL:
         cache_type_bytes = cache_type.encode('utf-8')
         self.dll.clear_cache(cache_type_bytes)
         if cache_type in ["all", "layers"]:
-            self.layer_cache.clear()
+            self.layer_cache = False
         print(f"DLL缓存已清理: {cache_type}")
     
     def generate_complete_image(

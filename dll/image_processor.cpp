@@ -11,7 +11,7 @@
 #include <vector>
 
 // 计时用
-//#define _DEBUG
+#define _DEBUG
 #ifdef _DEBUG
 #include <chrono>
 #define DEBUG_PRINT(fmt, ...) printf("[DEBUG] " fmt "\n", ##__VA_ARGS__)
@@ -1462,20 +1462,49 @@ private:
 
   // 背景组件绘制
   bool DrawBackgroundComponent(SDL_Surface *target1, SDL_Surface *target2, cJSON *comp_obj, int background_index) {
-    bool use_fixed_bg = GetJsonBool(comp_obj, "use_fixed_background", false);
-    char bg_name[32];
-    DEBUG_PRINT("draw background");
-    if (use_fixed_bg) {
-      const char *overlay = GetJsonString(comp_obj, "overlay", "");
-      strncpy(bg_name, overlay, sizeof(bg_name) - 1);
-      char *dot = strrchr(bg_name, '.');
-      if (dot)
-        *dot = '\0';
+    const char *overlay = GetJsonString(comp_obj, "overlay", "");
+
+    DEBUG_PRINT("draw background, overlay: %s", overlay ? overlay : "null");
+
+    SDL_Surface *bg_surface = nullptr;
+
+    if (overlay && strlen(overlay) > 0) {
+      // 检查是否是颜色值（以#开头的十六进制颜色）
+      if (overlay[0] == '#') {
+        // 解析颜色值，支持 #RRGGBB 格式
+        unsigned int hex_color = 0;
+        if (strlen(overlay) >= 7) {
+          sscanf(overlay + 1, "%06x", &hex_color);
+          Uint8 r = (hex_color >> 16) & 0xFF;
+          Uint8 g = (hex_color >> 8) & 0xFF;
+          Uint8 b = hex_color & 0xFF;
+
+          // 创建一个纯色表面（使用画布尺寸）
+          int canvas_width = target1 ? target1->w : 2560;
+          int canvas_height = target1 ? target1->h : 1440;
+
+          bg_surface = SDL_CreateRGBSurfaceWithFormat(0, canvas_width, canvas_height, 32, SDL_PIXELFORMAT_ABGR8888);
+          if (bg_surface) {
+            SDL_FillRect(bg_surface, nullptr, SDL_MapRGBA(bg_surface->format, r, g, b, 255));
+          }
+        }
+      } else {
+        // 加载图片背景
+        char bg_name[32];
+        strncpy(bg_name, overlay, sizeof(bg_name) - 1);
+        char *dot = strrchr(bg_name, '.');
+        if (dot)
+          *dot = '\0';
+
+        bg_surface = LoadBackgroundImage(bg_name);
+      }
     } else {
+      // 随机背景
+      char bg_name[32];
       snprintf(bg_name, sizeof(bg_name), "c%d", background_index);
+      bg_surface = LoadBackgroundImage(bg_name);
     }
 
-    SDL_Surface *bg_surface = LoadBackgroundImage(bg_name);
     if (!bg_surface)
       return false;
 
@@ -1510,15 +1539,11 @@ private:
 
   // 角色组件绘制
   bool DrawCharacterComponent(SDL_Surface *target1, SDL_Surface *target2, cJSON *comp_obj, const char *character_name, int emotion_index) {
-    bool use_fixed_character = GetJsonBool(comp_obj, "use_fixed_character", false);
-
     const char *draw_char_name = character_name;
     int draw_emotion = emotion_index;
 
-    if (use_fixed_character) {
-      draw_char_name = GetJsonString(comp_obj, "character_name", "");
-      draw_emotion = static_cast<int>(GetJsonNumber(comp_obj, "emotion_index", 1));
-    }
+    draw_char_name = GetJsonString(comp_obj, "character_name", "");
+    draw_emotion = static_cast<int>(GetJsonNumber(comp_obj, "emotion_index", 1));
 
     if (!draw_char_name || strlen(draw_char_name) == 0 || draw_emotion <= 0) {
       return false;
