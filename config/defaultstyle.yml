@@ -8,7 +8,7 @@
     fill_mode: height
     layer: 0
     name: 背景
-    overlay: c12.webp
+    overlay: 12 多功能厅.webp
     type: background
   - align: bottom-left
     character_name: hiro
@@ -179,7 +179,7 @@ default:
     fill_mode: height
     layer: 0
     name: 背景
-    overlay: c14.webp
+    overlay: 14 原审启动.webp
     type: background
     use_fixed_background: true
   - align: middle-right
