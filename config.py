@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 import yaml
 import json
 from sys import platform
-from path_utils import get_base_path, get_resource_path, ensure_path_exists
+from path_utils import get_resource_path, ensure_path_exists, get_background_list
 from image_processor import update_dll_gui_settings, update_style_config, clear_cache
 
 class StyleConfig:
@@ -22,7 +22,7 @@ class StyleConfig:
         """从 defaultstyle.yml 加载默认样式配置"""
         try:
             filepath = get_resource_path(os.path.join("config", "defaultstyle.yml"))
-            if os.path.exists(filepath):
+            if filepath:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     return yaml.safe_load(f) or {}
             else:
@@ -35,12 +35,10 @@ class StyleConfig:
 class ConfigLoader:
     """配置加载器"""
     
-    def __init__(self, base_path=None):
-        # 如果没有提供base_path，使用自动检测的路径
-        self.base_path = base_path if base_path else get_base_path()
-        self.config_path = get_resource_path("config")
-
-        self.config = AppConfig(os.path.dirname(os.path.abspath(__file__)))
+    def __init__(self):
+        self.AUTO_PASTE_IMAGE = True
+        self.AUTO_SEND_IMAGE = True
+        self.ASSETS_PATH = get_resource_path("assets")
 
         # 规范化平台键
         self.platform = platform
@@ -67,32 +65,27 @@ class ConfigLoader:
         self.preview_style = None
 
         # 加载版本信息
-        self.version_info = self.load_version_info()
+        self.version_info = self._load_yaml_file("version.yml")
         # 设置版本号属性
         self.version = self.version_info["version"] # 需要存在version.yml文件
 
         # 配置加载
-        self.mahoshojo = self.load_config("chara_meta")
-        self.character_list = list(self.mahoshojo.keys())
-        
-        self.current_character = None
-        self.keymap = self.load_config("keymap")
-        self.process_whitelist = self.load_config("process_whitelist")
-        self.gui_settings = self.load_config("settings")
+        self.mahoshojo = self._load_config("chara_meta")
+        self.keymap = self._load_config("keymap")
+        self.process_whitelist = self._load_config("process_whitelist")
+        self.gui_settings = self._load_config("settings")
 
         # 确保enabled只有在display为True时才可能为True
         sm = self.gui_settings["sentiment_matching"]
         sm["enabled"] &= sm["display"]
         self.ai_models = self.gui_settings.get("sentiment_matching", {}).get("model_configs", {})
         
-        # 背景列表
-        self.background_list = self._get_background_list()
-        self.background_count = len(self.background_list)  # 背景图片数量
-        
+        # 角色和背景列表
+        self.background_list = get_background_list()
+        self.character_list = list(self.mahoshojo.keys())
+
         # 加载样式配置
         self._load_style_configs()
-        # 复制当前样式到预览样式
-        self._init_preview_style()
 
     def _get_current_character_from_layers(self):
         """从角色图层组件获取当前角色（第一个非固定角色的图层）"""
@@ -206,14 +199,13 @@ class ConfigLoader:
             # 更新预览样式
             self._init_preview_style()
             
-            # 更新当前角色
-            self.current_character = self._get_current_character_from_layers()
-            
             # 如果使用角色颜色作为强调色，更新强调色
             self.update_bracket_color_from_character()
 
-            # 保存上次选择的样式到GUI设置
+            # 更新DLL配置
             update_style_config(self.style)
+            
+            # 保存上次选择的样式到GUI设置
             self.gui_settings["last_style"] = style_name
             self.save_gui_settings()
 
@@ -232,8 +224,8 @@ class ConfigLoader:
             # 如果更新的是当前样式，立即应用
             if self.current_style == style_name:
                 self.apply_style(style_name)
-                
-            return self.save_style_configs()
+        
+            return self._save_yaml_file("styles.yml", self.style_configs)
     
     def _load_style_configs(self):
         """加载样式配置"""
@@ -267,27 +259,7 @@ class ConfigLoader:
             #单独更新括号颜色
             update_style_config(self.style)
 
-    def _get_background_list(self) -> list:
-        """获取背景文件列表（移除c开头的限制）"""
-        try:
-            background_dir = get_resource_path(os.path.join("assets", "background"))
-            if os.path.exists(background_dir):
-                # 获取所有图片文件（移除c开头的限制）
-                image_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp']
-                bg_files = []
-                for f in os.listdir(background_dir):
-                    # 检查是否为图片文件
-                    if any(f.lower().endswith(ext) for ext in image_extensions):
-                        bg_files.append(f)
-                return sorted(bg_files)
-            else:
-                print(f"警告：背景图片目录不存在: {background_dir}")
-                return []
-        except Exception as e:
-            print(f"获取背景文件列表失败: {e}")
-            return []
-
-    def load_config(self, config_type: str, *args) -> Any:
+    def _load_config(self, config_type: str, *args) -> Any:
         """
         通用配置加载函数
         
@@ -312,6 +284,8 @@ class ConfigLoader:
                 config = config.get(self.platform, {})
             else:
                 config = self._get_default_setting(config_type)
+                if config_type == "keymap":
+                    self._save_yaml_file("keymap.yml", {self.platform: config})
         elif config_type == "settings":
             # 处理settings配置，确保所有字段都存在
             default_settings = self._get_default_setting("settings")
@@ -412,7 +386,7 @@ class ConfigLoader:
         """通用YAML文件加载函数"""
         filepath = get_resource_path(os.path.join("config", filename))
         
-        if not os.path.exists(filepath):
+        if not filepath:
             return None
         
         try:
@@ -426,7 +400,6 @@ class ConfigLoader:
         """通用YAML文件保存函数"""
         try:
             filepath = ensure_path_exists(get_resource_path(os.path.join("config", filename)))
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
             
             with open(filepath, 'w', encoding='utf-8') as f:
                 yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
@@ -440,8 +413,8 @@ class ConfigLoader:
         if index is not None:
             return self.mahoshojo[index]["full_name"] if full_name else index
         else:
-            # 直接返回 current_character
-            chara = self.current_character
+            # 直接返回 当前角色
+            chara = self._get_current_character_from_layers()
             return self.mahoshojo[chara]["full_name"] if full_name else chara
     
     def get_available_models(self) -> Dict[str, Dict[str, Any]]:
@@ -491,6 +464,8 @@ class ConfigLoader:
             keymap_data[self.platform] = {}
         keymap_data[self.platform] |= new_hotkeys
 
+        CONFIGS.keymap = keymap_data[self.platform]
+
         # 保存回文件
         return self._save_yaml_file("keymap.yml", keymap_data)
 
@@ -506,6 +481,7 @@ class ConfigLoader:
         
         # 更新当前平台的白名单
         existing_data[self.platform] = processes
+        CONFIGS.process_whitelist = processes
 
         # 保存回文件
         return self._save_yaml_file("process_whitelist.yml", existing_data)
@@ -513,7 +489,7 @@ class ConfigLoader:
     def save_gui_settings(self):
         """保存GUI设置到settings.yml（仅更新变化的部分）"""
         # 加载现有配置
-        existing_data = self._load_yaml_file("settings.yml") or {}
+        existing_data = self._load_yaml_file("settings.yml")
         
         # 没有变化就返回个False
         if json.dumps(existing_data, sort_keys=True) == json.dumps(self.gui_settings, sort_keys=True):
@@ -525,23 +501,6 @@ class ConfigLoader:
         update_dll_gui_settings(self.gui_settings)
         # 保存回文件
         return self._save_yaml_file("settings.yml", existing_data)
-
-    def save_style_configs(self):
-        """保存样式配置到文件"""
-        # 检查是否有变化
-        existing_data = self._load_yaml_file("styles.yml") or {}
-        if self.style_configs == existing_data:
-            return True  # 没有变化，不保存
-    
-        return self._save_yaml_file("styles.yml", self.style_configs)
-
-    def load_version_info(self) -> Dict[str, Any]:
-        """加载版本信息"""
-        try:
-            return self._load_yaml_file("version.yml")
-        except Exception as e:
-            print(f"加载版本信息失败: {e}")
-            return {"version": "0.0.0"}
 
     def get_program_info(self) -> Dict[str, Any]:
         """获取程序信息"""
@@ -556,18 +515,5 @@ class ConfigLoader:
     def get_version_history(self) -> list:
         """获取版本历史"""
         return self.version_info.get("history", [])
-    
-    
-class AppConfig:
-    """应用配置类"""
-    def __init__(self, base_path=None):
-        # 使用样式配置中的文本框区域
-        self.KEY_DELAY = 0.05  # 按键延迟
-        self.AUTO_PASTE_IMAGE = True
-        self.AUTO_SEND_IMAGE = True
-        # 使用自动检测的基础路径
-        self.BASE_PATH = base_path if base_path else get_base_path()
-        self.ASSETS_PATH = get_resource_path("assets")
-
 
 CONFIGS = ConfigLoader()

@@ -3,7 +3,6 @@
 import os
 import sys
 
-
 def get_base_path():
     """获取程序的基础路径，支持打包环境和开发环境"""
     if getattr(sys, 'frozen', False):
@@ -43,17 +42,11 @@ def get_resource_path(relative_path):
     """获取资源文件的绝对路径，支持打包环境"""
     base_path = get_base_path()
     
-    # 在打包环境中，优先从程序所在目录查找
-    if getattr(sys, 'frozen', False):
-        # 首先尝试程序目录下的资源文件
-        program_dir_path = os.path.join(base_path, relative_path)
-        if os.path.exists(program_dir_path):
-            return program_dir_path
-    
-    # 开发环境或打包环境未找到资源时，使用基础路径
-    resource_path = os.path.join(base_path, relative_path)
-    return resource_path
-
+    program_dir_path = os.path.join(base_path, relative_path)
+    if os.path.exists(program_dir_path):
+        return program_dir_path
+    else:
+        return ""
 
 def ensure_path_exists(file_path):
     """确保文件路径的目录存在"""
@@ -62,25 +55,12 @@ def ensure_path_exists(file_path):
         os.makedirs(directory, exist_ok=True)
     return file_path
 
-def get_font_path(font_name: str) -> str:
-    """获取字体文件路径，支持多种格式"""
-    supported_formats = ['.ttf', '.otf', '.ttc', '.woff', '.woff2']
-    
-    # 尝试在assets/fonts目录下查找字体
-    for ext in supported_formats:
-        font_path = get_resource_path(os.path.join("assets", "fonts", f"{font_name}{ext}"))
-        if os.path.exists(font_path):
-            return font_path
-    
-    # 如果所有格式都不存在，返回默认ttf格式的路径
-    return get_resource_path(os.path.join("assets", "fonts", f"{font_name}.ttf"))
-
 def get_available_fonts() -> list:
     """获取可用字体列表，只返回文件名（不含扩展名）"""
     fonts_dir = get_resource_path(os.path.join("assets", "fonts"))
     font_files = []
     
-    if not os.path.exists(fonts_dir):
+    if not fonts_dir:
         print(f"字体目录不存在: {fonts_dir}")
         return []
     
@@ -94,8 +74,23 @@ def get_available_fonts() -> list:
     
     return sorted(set(font_files))
 
-def is_font_available(font_name: str) -> bool:
-    """检查字体是否可用"""
-    font_path = os.path.join("assets", "fonts", font_name)
-    resolved_font_path = get_resource_path(font_path)
-    return os.path.exists(resolved_font_path)
+
+def get_background_list() -> list:
+    """获取背景文件列表"""
+    try:
+        background_dir = get_resource_path(os.path.join("assets", "background"))
+        if background_dir:
+            # 获取所有图片文件
+            image_extensions = ['.webp', '.png', '.jpg', '.jpeg', '.bmp', '.gif']
+            bg_files = []
+            for f in os.listdir(background_dir):
+                # 检查是否为图片文件
+                if any(f.lower().endswith(ext) for ext in image_extensions):
+                    bg_files.append(f)
+            return sorted(bg_files)
+        else:
+            print(f"警告：背景图片目录不存在: {background_dir}")
+            return []
+    except Exception as e:
+        print(f"获取背景文件列表失败: {e}")
+        return []

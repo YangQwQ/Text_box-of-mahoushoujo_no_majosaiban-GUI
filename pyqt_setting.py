@@ -510,13 +510,11 @@ class SettingWindow(QDialog):
         # 保存进程白名单
         processes = self._collect_whitelist()
         if CONFIGS.save_process_whitelist(processes):
-            CONFIGS.process_whitelist = CONFIGS.load_config("process_whitelist")
             self.core.update_status("白名单更新")
         
         # 保存热键
         hotkeys = self._collect_hotkeys()
         if CONFIGS.save_keymap(hotkeys):
-            CONFIGS.keymap = CONFIGS.load_config("keymap")
             self.core.update_status("热键更新")
         
         # 重置修改标志

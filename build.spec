@@ -28,16 +28,12 @@ core_files = [
     'gui.py',
     'core.py',
     'config.py',
-    'clipboard_utils.py',
-    'sentiment_analyzer.py',
     'pyqt_tabs.py',
     'pyqt_hotkeys.py',
     'pyqt_setting.py',
     'pyqt_style.py',
     'pyqt_about.py',
-    'path_utils.py',
     'image_processor.py',
-    'update_checker.py',
 ]
 
 for file in core_files:

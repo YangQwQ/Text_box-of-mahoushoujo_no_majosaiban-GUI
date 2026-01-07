@@ -167,9 +167,6 @@ class ManosabaMainWindow(QMainWindow):
                 self.ui.tabWidget_Layer.addTab(tab, tab_name)
                 self.character_tabs.append(tab)
             
-            # 更新当前角色
-            CONFIGS.current_character = CONFIGS._get_current_character_from_layers()
-            
             # 如果样式窗口打开，更新样式窗口的组件编辑器
             if hasattr(self, 'style_window') and self.style_window:
                 self.style_window.init_component_editors()
@@ -238,8 +235,8 @@ class ManosabaMainWindow(QMainWindow):
     def _init_settings(self):
         """初始化设置"""
         # 自动粘贴和自动发送
-        self.ui.checkBox_AutoPaste.setChecked(CONFIGS.config.AUTO_PASTE_IMAGE)
-        self.ui.checkBox_AutoSend.setChecked(CONFIGS.config.AUTO_SEND_IMAGE)
+        self.ui.checkBox_AutoPaste.setChecked(CONFIGS.AUTO_PASTE_IMAGE)
+        self.ui.checkBox_AutoSend.setChecked(CONFIGS.AUTO_SEND_IMAGE)
         
         # 情感匹配
         self.ui.checkBox_EmoMatch.setChecked(False)
@@ -308,11 +305,11 @@ class ManosabaMainWindow(QMainWindow):
     
     def on_auto_paste_changed(self, checked):
         """自动粘贴设置改变"""
-        CONFIGS.config.AUTO_PASTE_IMAGE = checked
+        CONFIGS.AUTO_PASTE_IMAGE = checked
     
     def on_auto_send_changed(self, checked):
         """自动发送设置改变"""
-        CONFIGS.config.AUTO_SEND_IMAGE = checked
+        CONFIGS.AUTO_SEND_IMAGE = checked
 
     def update_preview(self):
         """更新预览"""

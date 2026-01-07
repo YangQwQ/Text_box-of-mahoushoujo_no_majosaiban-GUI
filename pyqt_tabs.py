@@ -330,8 +330,8 @@ class CharacterTabWidget(QWidget):
                     if self.ui.combo_character_select.count() > 0:
                         self.ui.combo_character_select.setCurrentIndex(0)
             else:
-                # 如果没有设置角色，使用当前角色
-                current_character = CONFIGS.current_character
+                # 如果没有设置角色，使用角色第二个
+                current_character = CONFIGS.character_list[1]
                 self.current_character_id = current_character
                 current_text = f"{CONFIGS.get_character(current_character, full_name=True)} ({current_character})"
                 index = self.ui.combo_character_select.findText(current_text)
@@ -425,10 +425,6 @@ class CharacterTabWidget(QWidget):
             CONFIGS.update_preview_component(self.layer_index, {
                 "character_name": char_id,
             })
-            
-            # 更新当前角色变量（如果是第一个角色图层或非固定角色图层）
-            if self.layer_index == 1 or not self.get_component_config().get("use_fixed_character", False):
-                CONFIGS.current_character = char_id
             
             # 更新表情下拉框
             self._init_emotion_combo()

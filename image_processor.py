@@ -1,5 +1,4 @@
 # image_loader.py - 和dll交互的模块
-import os
 import ctypes
 import json
 import time
@@ -18,7 +17,7 @@ class EnhancedImageLoaderDLL:
         if dll_path is None:
             dll_path = get_internal_path("dll/Image_Processor.dll")
         
-        if not os.path.exists(dll_path):
+        if not dll_path:
             raise FileNotFoundError(f"DLL文件不存在: {dll_path}")
         
         print(f"正在加载DLL图片合成器: {dll_path}")

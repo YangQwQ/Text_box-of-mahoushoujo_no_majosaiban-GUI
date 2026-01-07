@@ -7,7 +7,7 @@ import traceback
 
 from ui.about_window import Ui_AboutWindow
 from config import CONFIGS
-from update_checker import update_checker
+from utils.update_checker import update_checker
 
 
 class CheckUpdateThread(QThread):

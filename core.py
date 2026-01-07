@@ -1,7 +1,7 @@
 """魔裁文本框核心逻辑"""
 from config import CONFIGS
-from clipboard_utils import ClipboardManager
-from sentiment_analyzer import SentimentAnalyzer
+from utils.clipboard_utils import ClipboardManager
+from utils.sentiment_analyzer import SentimentAnalyzer
 from image_processor import get_enhanced_loader, generate_image_with_dll, set_dll_global_config, clear_cache, update_dll_gui_settings, draw_content_auto
 
 import time
@@ -56,8 +56,7 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
         self.current_model = CONFIGS.gui_settings.get("sentiment_matching",{}).get("ai_model", "")  # 当前模型名称
         
         # 初始化DLL加载器
-        self._assets_path = CONFIGS.config.ASSETS_PATH
-        set_dll_global_config(self._assets_path, min_image_ratio=0.2)
+        set_dll_global_config(CONFIGS.ASSETS_PATH, min_image_ratio=0.2)
         update_dll_gui_settings(CONFIGS.gui_settings)
 
     def update_status(self, message: str):
@@ -345,8 +344,7 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
                         else:
                             background_info = f"固定背景: {overlay} |"
                     else:
-                        background_count = CONFIGS.background_count
-                        if background_count > 0:
+                        if len(CONFIGS.background_list) > 0:
                             overlay = random.choice(CONFIGS.background_list)
                             component["overlay"] = overlay
                             background_info = f"随机背景: {overlay} |"
@@ -503,7 +501,7 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
         print(f"[{int((time.time()-start_time)*1000)}] 剪切板确认完成")
 
         # 自动粘贴和发送
-        if CONFIGS.config.AUTO_PASTE_IMAGE:
+        if CONFIGS.AUTO_PASTE_IMAGE:
             self.kbd_controller.press(Key.ctrl if platform != "darwin" else Key.cmd)
             self.kbd_controller.press("v")
             self.kbd_controller.release("v")
@@ -511,7 +509,7 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
 
             if not self._active_process_allowed():
                 return "前台应用不在白名单内"
-            if CONFIGS.config.AUTO_SEND_IMAGE:
+            if CONFIGS.AUTO_SEND_IMAGE:
                 time.sleep(0.4)
                 self.kbd_controller.press(Key.enter)
                 self.kbd_controller.release(Key.enter)

@@ -691,8 +691,7 @@ class StyleWindow(QDialog):
 
     def update_bracket_color_from_character(self):
         """根据当前角色的文本颜色更新强调色"""
-        from config import CONFIGS
-        character_name = CONFIGS.current_character
+        character_name = CONFIGS._get_current_character_from_layers()
         if character_name in CONFIGS.character_list and CONFIGS.mahoshojo[character_name]["text"]:
             first_config = CONFIGS.mahoshojo[character_name]["text"][0]
             font_color = first_config.get("font_color", (255, 255, 255))
