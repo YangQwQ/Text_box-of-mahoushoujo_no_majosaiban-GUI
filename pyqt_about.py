@@ -162,7 +162,7 @@ class AboutWindow(QDialog):
                 # 添加下载链接
                 assets = latest.get("assets", [])
                 if assets:
-                    update_info += "下载链接：\n"
+                    update_info += "文件列表：\n"
                     for i, asset in enumerate(assets[:3]):  # 最多显示3个
                         update_info += f"• {asset.get('name', '未知文件')} "
                         update_info += f"({self._format_size(asset.get('size', 0))})\n"
@@ -172,7 +172,7 @@ class AboutWindow(QDialog):
                 
                 # GitHub页面链接提示
                 update_info += (
-                    f"\n请访问 GitHub 发布页面查看详情和下载：\n"
+                    f"\n下载链接：\n"
                     f"{update_checker.repo_url}releases/latest"
                 )
                 
@@ -191,22 +191,14 @@ class AboutWindow(QDialog):
     
     def _connect_signals(self):
         """连接信号槽"""
-        # 版本历史按钮
         self.ui.pushButton.clicked.connect(self.toggle_version_history)
-        
-        # 检查更新按钮
         self.ui.pushButton_2.clicked.connect(self.check_update)
-        
-        # 链接点击事件（已在UI中设置OpenExternalLinks，这里不需要额外处理）
     
     def toggle_version_history(self):
         """切换版本历史显示"""
         if self.content_type == "version_history":
-            # 如果当前显示的是版本历史，切换回原始内容
             self._set_original_description()
         else:
-            # 如果当前显示的不是版本历史，切换到版本历史
-            # 生成版本历史内容
             if not self.version_history_content:
                 self._set_version_history_content()
             

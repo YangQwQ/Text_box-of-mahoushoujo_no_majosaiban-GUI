@@ -2,18 +2,24 @@
 # 版本信息配置
 
 # 当前版本号
-version: "2.0.4"
+version: "2.0.6"
 
 # 版本历史 记录的是exe的更新，并非代码的更新记录
 history:
+  - version: "2.0.6"
+    date: "2026-1-7"
+    description:
+      - "修复了更新检查时显示的发布时间没有加上时区的bug"
   - version: "2.0.4"
-    date: "2026-1-6"
+    date: "2026-1-7"
     description:
       - "使用PyQT重做了UI并优化了界面布局"
       - "修改了部分功能的布局"
+      - "合并了text_configs和chara_meta配置文件"
       - "添加了多角色实时编辑表情的功能"
       - "情感匹配可以为多个角色选择表情了"
       - "添加了纯色背景的功能"
+      - "重命名了背景文件"
   - version: "1.7.0"
     date: "2025-12-30"
     description:

@@ -48,14 +48,17 @@ class UpdateChecker:
             if response.status_code == 200:
                 data = response.json()
                 
-                # 格式化发布时间
+                # 格式化发布时间 - 转换为本地时间
                 published_at = data.get('published_at', 'N/A')
                 if published_at != 'N/A':
                     try:
-                        dt = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
-                        published_at = dt.strftime("%Y-%m-%d %H:%M:%S")
-                    except:
-                        pass
+                        # GitHub返回的是UTC时间，转换为本地时间
+                        dt_utc = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
+                        dt_local = dt_utc.astimezone()
+                        published_at = dt_local.strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception as e:
+                        # 如果转换失败，保留原始时间
+                        print(f"时间转换失败: {e}")
                 
                 # 提取主要信息
                 latest_release = {
