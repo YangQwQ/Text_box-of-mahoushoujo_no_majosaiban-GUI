@@ -1,10 +1,10 @@
-# image_loader.py - 和dll交互的模块
+# image_processor.py - 和dll交互的模块
 import ctypes
 import json
 import time
 import emoji
 from io import BytesIO
-from ctypes import c_char_p, c_int, POINTER, c_ubyte, c_void_p, c_float
+from ctypes import c_char_p, c_int, POINTER, c_ubyte, c_void_p, c_float, create_string_buffer, cast
 from typing import List, Dict, Any, Tuple, Optional
 from PIL import Image
 
@@ -30,29 +30,33 @@ class EnhancedImageLoaderDLL:
             raise OSError(f"加载DLL失败: {e}")
         
         self.layer_cache = False
+        self._psd_buffers = []
     
     def _define_function_signatures(self):
         """定义DLL函数签名"""
-        
         # 清理缓存
         self.dll.clear_cache.argtypes = [c_char_p]
         self.dll.clear_cache.restype = None
-        
-        # 生成完整图像（使用JSON字符串）
-        self.dll.generate_complete_image.argtypes = [
-            c_int,                   # canvas_width
-            c_int,                   # canvas_height
-            c_char_p,                # components_json
+
+        # 修改：根据C++签名更新generate_image参数
+        self.dll.generate_image.argtypes = [
+            c_int,                      # canvas_width
+            c_int,                      # canvas_height
+            c_char_p,                   # components_json
+            c_void_p,                   # image_data (RGBA数据指针)
+            c_int,                      # image_width
+            c_int,                      # image_height
+            c_int,                      # image_pitch
             POINTER(POINTER(c_ubyte)),  # out_data
-            POINTER(c_int),          # out_width
-            POINTER(c_int)           # out_height
+            POINTER(c_int),             # out_width
+            POINTER(c_int)              # out_height
         ]
-        self.dll.generate_complete_image.restype = c_int
-        
+        self.dll.generate_image.restype = c_int
+
         # 清理所有资源
         self.dll.cleanup_all.argtypes = []
         self.dll.cleanup_all.restype = None
-        
+
         # 释放图像数据
         self.dll.free_image_data.argtypes = [POINTER(c_ubyte)]
         self.dll.free_image_data.restype = None
@@ -95,6 +99,12 @@ class EnhancedImageLoaderDLL:
             self.layer_cache = False
         print(f"DLL缓存已清理: {cache_type}")
     
+    def _pil_to_rgba_bytes(self, img: Image.Image) -> tuple[bytes, int, int]:
+        """返回 RGBA 字节流、宽、高"""
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        return img.tobytes(), img.width, img.height
+
     def generate_complete_image(
         self,
         canvas_width: int,
@@ -102,25 +112,70 @@ class EnhancedImageLoaderDLL:
         components: List[Dict[str, Any]],
     ) -> Optional[Image.Image]:
         """生成完整的图像，使用JSON传递组件配置"""
+        # 1. 准备外部图像数据（用于character组件的PSD图像）
+        external_image_data = None
+        external_image_width = 0
+        external_image_height = 0
+        external_image_pitch = 0
         
-        # 将组件列表转换为JSON字符串
-        components_json = json.dumps(components, ensure_ascii=False)
+        # 2. 确保缓冲区列表存在
+        if not hasattr(self, '_psd_buffers'):
+            self._psd_buffers = []
         
-        # 准备输出参数
+        # 清空之前的缓冲区
+        self._psd_buffers.clear()
+        
+        # 查找character组件中的PSD图像
+        for comp in components:
+            if comp.get("type") == "character" and comp.get("overlay") == "__PSD__":
+                img = comp.pop("__psd_image__", None)  # PIL.Image
+                if img:
+                    # 转换为RGBA格式
+                    img_rgba = img.convert("RGBA")
+                    width, height = img_rgba.size
+                    pitch = width * 4
+                    rgba_bytes = img_rgba.tobytes()
+                    
+                    # 创建缓冲区并保存引用
+                    buffer = create_string_buffer(rgba_bytes)
+                    self._psd_buffers.append(buffer)
+                    
+                    # 设置外部图像数据参数
+                    external_image_data = cast(buffer, c_void_p)
+                    external_image_width = width
+                    external_image_height = height
+                    external_image_pitch = pitch
+                    
+                    # 在JSON中标记使用外部图像数据
+                    comp["use_external_image"] = True
+                    
+                    # 从组件中移除图像数据相关字段，因为将通过参数传递
+                    comp.pop("image_width", None)
+                    comp.pop("image_height", None)
+                    comp.pop("image_pitch", None)
+                    comp.pop("image_bytes", None)
+                    comp.pop("image_data_ptr", None)
+                    
+                    break  # 目前只支持一个外部图像数据
+        
+        # 3. 序列化 JSON
+        components_json = json.dumps(components, ensure_ascii=False).encode('utf-8')
+        
+        # 4. 调用 DLL
         out_data = POINTER(c_ubyte)()
-        out_width = c_int()
-        out_height = c_int()
+        out_w, out_h = c_int(), c_int()
         
-        # 调用DLL函数
-        components_json_bytes = components_json.encode('utf-8')
-        
-        result = self.dll.generate_complete_image(
+        result = self.dll.generate_image(
             canvas_width,
             canvas_height,
-            components_json_bytes,
+            components_json,
+            external_image_data if external_image_data else c_void_p(None),
+            external_image_width,
+            external_image_height,
+            external_image_pitch,
             ctypes.byref(out_data),
-            ctypes.byref(out_width),
-            ctypes.byref(out_height)
+            ctypes.byref(out_w),
+            ctypes.byref(out_h)
         )
         
         if result != 1:  # LOAD_SUCCESS = 1
@@ -128,8 +183,8 @@ class EnhancedImageLoaderDLL:
             return None
         
         # 转换为PIL Image
-        width = out_width.value
-        height = out_height.value
+        width = out_w.value
+        height = out_h.value
         
         if width <= 0 or height <= 0:
             print(f"无效的图像尺寸: {width}x{height}")
@@ -138,6 +193,7 @@ class EnhancedImageLoaderDLL:
         # 读取数据
         data_size = width * height * 4
         addr = ctypes.cast(out_data, c_void_p).value
+        
         if not addr:
             print("无效的图像数据地址")
             return None
@@ -396,7 +452,7 @@ def update_style_config(style_config):
     # 将配置转换为JSON字符串
     style_json = json.dumps(style_dict, ensure_ascii=False).encode('utf-8')
     
-    # 调用C++端的更新函数（需要先在DLL中添加这个函数）
+    # 调用C++端的更新函数
     if hasattr(loader.dll, 'update_style_config'):
         loader.dll.update_style_config.argtypes = [c_char_p]
         loader.dll.update_style_config.restype = None

@@ -143,7 +143,7 @@ class CharacterComponent(QWidget):
         self.label_character_select.setObjectName(u"label_character_select")
         sizePolicy1.setHeightForWidth(self.label_character_select.sizePolicy().hasHeightForWidth())
         self.label_character_select.setSizePolicy(sizePolicy1)
-        self.label_character_select.setMinimumSize(QSize(60, 0))
+        self.label_character_select.setMinimumSize(QSize(40, 0))
         
         self.horizontalLayout_line2.addWidget(self.label_character_select)
         
@@ -151,7 +151,7 @@ class CharacterComponent(QWidget):
         self.combo_character.setObjectName(u"combo_character")
         sizePolicy2.setHeightForWidth(self.combo_character.sizePolicy().hasHeightForWidth())
         self.combo_character.setSizePolicy(sizePolicy2)
-        self.combo_character.setMinimumSize(QSize(90, 30))
+        self.combo_character.setMinimumSize(QSize(60, 30))
         
         self.horizontalLayout_line2.addWidget(self.combo_character)
         
@@ -166,31 +166,47 @@ class CharacterComponent(QWidget):
         
         self.combo_poise = QComboBox(self.widget_line2)
         self.combo_poise.setObjectName(u"combo_poise")
-        self.combo_poise.setMinimumSize(QSize(0, 30))
+        self.combo_poise.setMinimumSize(QSize(60, 30))
         
         self.horizontalLayout_line2.addWidget(self.combo_poise)
         
-        self.label_position = QLabel(self.widget_line2)
-        self.label_position.setObjectName(u"label_position")
-        sizePolicy1.setHeightForWidth(self.label_position.sizePolicy().hasHeightForWidth())
-        self.label_position.setSizePolicy(sizePolicy1)
-        self.label_position.setMinimumSize(QSize(40, 0))
-        self.label_position.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_clothes = QLabel(self.widget_line2)
+        self.label_clothes.setObjectName(u"label_clothes")
+        sizePolicy1.setHeightForWidth(self.label_clothes.sizePolicy().hasHeightForWidth())
+        self.label_clothes.setSizePolicy(sizePolicy1)
+        self.label_clothes.setMinimumSize(QSize(40, 0))
+        self.label_clothes.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.horizontalLayout_line2.addWidget(self.label_clothes)
+
+        self.combo_clothes = QComboBox(self.widget_line2)
+        self.combo_clothes.setObjectName(u"combo_clothes")
+        self.combo_clothes.setMinimumSize(QSize(60, 30))
+        self.horizontalLayout_line2.addWidget(self.combo_clothes)
+
+        self.label_action = QLabel(self.widget_line2)
+        self.label_action.setObjectName(u"label_action")
+        sizePolicy1.setHeightForWidth(self.label_action.sizePolicy().hasHeightForWidth())
+        self.label_action.setSizePolicy(sizePolicy1)
+        self.label_action.setMinimumSize(QSize(40, 0))
+        self.label_action.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        self.horizontalLayout_line2.addWidget(self.label_position)
+        self.horizontalLayout_line2.addWidget(self.label_action)
         
-        self.combo_position = QComboBox(self.widget_line2)
-        self.combo_position.setObjectName(u"combo_position")
-        self.combo_position.setMinimumSize(QSize(0, 30))
+        self.combo_action = QComboBox(self.widget_line2)
+        self.combo_action.setObjectName(u"combo_action")
+        self.combo_action.setMinimumSize(QSize(60, 30))
         
-        self.horizontalLayout_line2.addWidget(self.combo_position)
+        self.horizontalLayout_line2.addWidget(self.combo_action)
         
-        self.horizontalLayout_line2.setStretch(0, 1)
-        self.horizontalLayout_line2.setStretch(1, 3)
-        self.horizontalLayout_line2.setStretch(2, 1)
-        self.horizontalLayout_line2.setStretch(3, 2)
-        self.horizontalLayout_line2.setStretch(4, 1)
-        self.horizontalLayout_line2.setStretch(5, 2)
+        # 重新分配拉伸比例（动态宽度）
+        self.horizontalLayout_line2.setStretch(0, 1)   # label_character_select
+        self.horizontalLayout_line2.setStretch(1, 5)   # combo_character
+        self.horizontalLayout_line2.setStretch(2, 1)   # label_poise
+        self.horizontalLayout_line2.setStretch(3, 2)   # combo_poise
+        self.horizontalLayout_line2.setStretch(4, 1)   # label_clothes
+        self.horizontalLayout_line2.setStretch(5, 2)   # combo_clothes
+        self.horizontalLayout_line2.setStretch(6, 1)   # label_action
+        self.horizontalLayout_line2.setStretch(7, 2)   # combo_action
 
         self.verticalLayout_detail.addWidget(self.widget_line2)
         
@@ -207,20 +223,6 @@ class CharacterComponent(QWidget):
         self.checkbox_fixed_emotion.setMinimumSize(QSize(150, 0))
         
         self.horizontalLayout_line3.addWidget(self.checkbox_fixed_emotion)
-        
-        # self.label_emotion_filter = QLabel(self.widget_line3)
-        # self.label_emotion_filter.setObjectName(u"label_emotion_filter")
-        # sizePolicy1.setHeightForWidth(self.label_emotion_filter.sizePolicy().hasHeightForWidth())
-        # self.label_emotion_filter.setSizePolicy(sizePolicy1)
-        # self.label_emotion_filter.setMinimumSize(QSize(60, 0))
-        
-        # self.horizontalLayout_line3.addWidget(self.label_emotion_filter)
-        
-        # self.combo_emotion_filter = QComboBox(self.widget_line3)
-        # self.combo_emotion_filter.setObjectName(u"combo_emotion_filter")
-        # self.combo_emotion_filter.setMinimumSize(QSize(0, 30))
-        
-        # self.horizontalLayout_line3.addWidget(self.combo_emotion_filter)
         
         self.label_emotion_select = QLabel(self.widget_line3)
         self.label_emotion_select.setObjectName(u"label_emotion_select")
@@ -306,7 +308,8 @@ class CharacterComponent(QWidget):
         self.button_delete.setText(QCoreApplication.translate("CharacterComponent", u"删除组件", None))
         self.label_character_select.setText(QCoreApplication.translate("CharacterComponent", u"角色选择", None))
         self.label_poise.setText(QCoreApplication.translate("CharacterComponent", u"姿态", None))
-        self.label_position.setText(QCoreApplication.translate("CharacterComponent", u"动作", None))
+        self.label_clothes.setText(QCoreApplication.translate("CharacterComponent", u"服装", None))
+        self.label_action.setText(QCoreApplication.translate("CharacterComponent", u"动作", None))
         self.checkbox_fixed_emotion.setText(QCoreApplication.translate("CharacterComponent", u"使用固定表情", None))
         # self.label_emotion_filter.setText(QCoreApplication.translate("CharacterComponent", u"表情筛选", None))
         self.label_emotion_select.setText(QCoreApplication.translate("CharacterComponent", u"表情选择", None))
@@ -410,7 +413,7 @@ class BackgroundComponent(QWidget):
         self.widget_detail.setEnabled(True)
         sizePolicy.setHeightForWidth(self.widget_detail.sizePolicy().hasHeightForWidth())
         self.widget_detail.setSizePolicy(sizePolicy)
-        self.widget_detail.setMinimumSize(QSize(0, 0))
+        self.widget_detail.setMinimumSize(QSize(40, 0))
         self.widget_detail.setAcceptDrops(False)
         
         self.verticalLayout_detail = QVBoxLayout(self.widget_detail)
@@ -1440,57 +1443,76 @@ class Ui_CharaCfg(object):
         
         self.combo_character_select = QComboBox(self.groupBox_character)
         self.combo_character_select.setObjectName(u"combo_character_select")
-        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         sizePolicy2.setHorizontalStretch(1)
         sizePolicy2.setVerticalStretch(0)
         sizePolicy2.setHeightForWidth(self.combo_character_select.sizePolicy().hasHeightForWidth())
         self.combo_character_select.setSizePolicy(sizePolicy2)
-        self.combo_character_select.setMinimumSize(QSize(150, 0))
+        self.combo_character_select.setMinimumSize(QSize(100, 30))
         
         self.horizontalLayout_group1.addWidget(self.combo_character_select)
         
         self.label_poise_select = QLabel(self.groupBox_character)
         self.label_poise_select.setObjectName(u"label_poise_select")
-        sizePolicy1.setHeightForWidth(self.label_poise_select.sizePolicy().hasHeightForWidth())
-        self.label_poise_select.setSizePolicy(sizePolicy1)
-        self.label_poise_select.setMinimumSize(QSize(100, 0))
+        sizePolicy2.setHeightForWidth(self.label_poise_select.sizePolicy().hasHeightForWidth())
+        self.label_poise_select.setSizePolicy(sizePolicy2)
+        self.label_poise_select.setMinimumSize(QSize(0, 0))
         self.label_poise_select.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.horizontalLayout_group1.addWidget(self.label_poise_select)
         
         self.combo_poise_select = QComboBox(self.groupBox_character)
         self.combo_poise_select.setObjectName(u"combo_poise_select")
-        sizePolicy3 = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        sizePolicy3 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         sizePolicy3.setHorizontalStretch(1)
         sizePolicy3.setVerticalStretch(0)
-        sizePolicy3.setHeightForWidth(self.combo_poise_select.sizePolicy().hasHeightForWidth())
-        self.combo_poise_select.setSizePolicy(sizePolicy3)
-        
+        sizePolicy2.setHeightForWidth(self.combo_poise_select.sizePolicy().hasHeightForWidth())
+        self.combo_poise_select.setSizePolicy(sizePolicy2)
+        self.combo_poise_select.setMinimumSize(QSize(50, 30))
+
         self.horizontalLayout_group1.addWidget(self.combo_poise_select)
         
-        self.label_position_select = QLabel(self.groupBox_character)
-        self.label_position_select.setObjectName(u"label_position_select")
-        sizePolicy1.setHeightForWidth(self.label_position_select.sizePolicy().hasHeightForWidth())
-        self.label_position_select.setSizePolicy(sizePolicy1)
-        self.label_position_select.setMinimumSize(QSize(100, 0))
-        self.label_position_select.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_clothes_select = QLabel(self.groupBox_character)
+        self.label_clothes_select.setObjectName(u"label_clothes_select")
+        sizePolicy2.setHeightForWidth(self.label_clothes_select.sizePolicy().hasHeightForWidth())
+        self.label_clothes_select.setSizePolicy(sizePolicy2)
+        self.label_clothes_select.setMinimumSize(QSize(0, 0))
+        self.label_clothes_select.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.horizontalLayout_group1.addWidget(self.label_clothes_select)
+
+        self.combo_clothes_select = QComboBox(self.groupBox_character)
+        self.combo_clothes_select.setObjectName(u"combo_clothes_select")
+        sizePolicy2.setHeightForWidth(self.combo_clothes_select.sizePolicy().hasHeightForWidth())
+        self.combo_clothes_select.setSizePolicy(sizePolicy2)
+        self.combo_clothes_select.setMinimumSize(QSize(50, 30))
+        self.horizontalLayout_group1.addWidget(self.combo_clothes_select)
+
+        self.label_action_select = QLabel(self.groupBox_character)
+        self.label_action_select.setObjectName(u"label_action_select")
+        sizePolicy2.setHeightForWidth(self.label_action_select.sizePolicy().hasHeightForWidth())
+        self.label_action_select.setSizePolicy(sizePolicy2)
+        self.label_action_select.setMinimumSize(QSize(0, 0))
+        self.label_action_select.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        self.horizontalLayout_group1.addWidget(self.label_position_select)
+        self.horizontalLayout_group1.addWidget(self.label_action_select)
         
-        self.combo_position_select = QComboBox(self.groupBox_character)
-        self.combo_position_select.setObjectName(u"combo_position_select")
-        sizePolicy3.setHeightForWidth(self.combo_position_select.sizePolicy().hasHeightForWidth())
-        self.combo_position_select.setSizePolicy(sizePolicy3)
+        self.combo_action_select = QComboBox(self.groupBox_character)
+        self.combo_action_select.setObjectName(u"combo_action_select")
+        sizePolicy2.setHeightForWidth(self.combo_action_select.sizePolicy().hasHeightForWidth())
+        self.combo_action_select.setSizePolicy(sizePolicy2)
+        self.combo_action_select.setMinimumSize(QSize(50, 30))
         
-        self.horizontalLayout_group1.addWidget(self.combo_position_select)
+        self.horizontalLayout_group1.addWidget(self.combo_action_select)
         
         # 设置拉伸比例
-        self.horizontalLayout_group1.setStretch(0, 0)  # label_character_select
-        self.horizontalLayout_group1.setStretch(1, 2)  # combo_character_select
-        self.horizontalLayout_group1.setStretch(2, 0)  # label_poise_select
-        self.horizontalLayout_group1.setStretch(3, 1)  # combo_poise_select
-        self.horizontalLayout_group1.setStretch(4, 0)  # label_position_select
-        self.horizontalLayout_group1.setStretch(5, 1)  # combo_position_select
+        self.horizontalLayout_group1.setStretch(0, 1)   # label_character_select
+        self.horizontalLayout_group1.setStretch(1, 3)   # combo_character_select
+        self.horizontalLayout_group1.setStretch(2, 1)   # label_poise_select
+        self.horizontalLayout_group1.setStretch(3, 2)   # combo_poise_select
+        self.horizontalLayout_group1.setStretch(4, 1)   # label_clothes_select
+        self.horizontalLayout_group1.setStretch(5, 2)   # combo_clothes_select
+        self.horizontalLayout_group1.setStretch(6, 1)   # label_action_select
+        self.horizontalLayout_group1.setStretch(7, 2)   # combo_action_select
         
         self.verticalLayout.addWidget(self.groupBox_character)
         
@@ -1504,12 +1526,12 @@ class Ui_CharaCfg(object):
         
         self.checkbox_random_emotion = QCheckBox(self.groupBox_emotion)
         self.checkbox_random_emotion.setObjectName(u"checkbox_random_emotion")
-        sizePolicy4 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        sizePolicy4 = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         sizePolicy4.setHorizontalStretch(2)
         sizePolicy4.setVerticalStretch(0)
         sizePolicy4.setHeightForWidth(self.checkbox_random_emotion.sizePolicy().hasHeightForWidth())
         self.checkbox_random_emotion.setSizePolicy(sizePolicy4)
-        self.checkbox_random_emotion.setMinimumSize(QSize(235, 0))
+        self.checkbox_random_emotion.setMinimumSize(QSize(35, 0))
         
         self.horizontalLayout_group2.addWidget(self.checkbox_random_emotion)
         
@@ -1568,7 +1590,8 @@ class Ui_CharaCfg(object):
         self.groupBox_character.setTitle(QCoreApplication.translate("Form", u"角色配置", None))
         self.label_character_select.setText(QCoreApplication.translate("Form", u"选择角色", None))
         self.label_poise_select.setText(QCoreApplication.translate("Form", u"姿态选择", None))
-        self.label_position_select.setText(QCoreApplication.translate("Form", u"动作选择", None))
+        self.label_clothes_select.setText(QCoreApplication.translate("Form", u"服装选择", None))
+        self.label_action_select.setText(QCoreApplication.translate("Form", u"动作选择", None))
         self.groupBox_emotion.setTitle(QCoreApplication.translate("Form", u"表情配置", None))
         self.checkbox_random_emotion.setText(QCoreApplication.translate("Form", u"随机表情", None))
         self.label_emotion_filter.setText(QCoreApplication.translate("Form", u"表情筛选", None))

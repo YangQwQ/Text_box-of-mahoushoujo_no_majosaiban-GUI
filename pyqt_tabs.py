@@ -258,27 +258,103 @@ class CharacterTabWidget(QWidget):
         # 存储组件配置的引用
         self.layer_index = layer_index
         self.current_character_id = None
-        self._ignore_signals = False
         self._component_config = component_config
-        
+        self._ignore_signals = False
+        self._pos_changing = False
+
         # 使用UI模板
         self.ui = Ui_CharaCfg()
         self.ui.setupUi(self)
-        
-        # 隐藏暂时不需要的控件
-        self.ui.label_poise_select.hide()
-        self.ui.label_position_select.hide()
-        self.ui.combo_poise_select.hide()
-        self.ui.combo_position_select.hide()
 
-        # 初始化表情筛选下拉框
         self._init_emotion_filter_combo()
-        
-        # 初始化UI从配置
         self._init_from_config()
-        
-        # 连接信号槽
         self._connect_signals()
+    
+    def _psd_info(self):
+        return CONFIGS.get_psd_info(self.current_character_id)
+    
+    def _setup_psd_ui(self, info):
+        try:
+            self._ignore_signals = True
+
+            poses = list(info["poses"].keys())
+            has_pose = bool(poses)
+            has_cloth = any(bool(v["clothes"]) for v in info["poses"].values())
+            has_action = any(any(v2) for v in info["poses"].values() for v2 in v["clothes"].values())
+
+            self.ui.label_emotion_filter.hide()
+            self.ui.combo_emotion_filter.hide()
+            self.ui.label_poise_select.setVisible(has_pose)
+            self.ui.combo_poise_select.setVisible(has_pose)
+            self.ui.label_clothes_select.setVisible(has_cloth)
+            self.ui.combo_clothes_select.setVisible(has_cloth)
+            self.ui.label_action_select.setVisible(has_action)
+            self.ui.combo_action_select.setVisible(has_action)
+
+            if has_pose:
+                self.ui.combo_poise_select.clear()
+                self.ui.combo_poise_select.addItems(poses)
+            else:
+                self.ui.combo_poise_select.currentIndexChanged.disconnect()
+        finally:
+            self._ignore_signals = False
+
+    def _setup_normal_ui(self):
+        self.ui.label_poise_select.hide()
+        self.ui.combo_poise_select.hide()
+        self.ui.label_clothes_select.hide()
+        self.ui.combo_clothes_select.hide()
+        self.ui.label_action_select.hide()
+        self.ui.combo_action_select.hide()
+    
+    def _on_psd_pose_changed(self, _):
+        if self._ignore_signals and not _:
+            return
+
+        info = self._psd_info()
+        if not info:
+            return
+        pose = self.ui.combo_poise_select.currentText()
+        if not pose:
+            return
+        
+        try:
+            self._pos_changing = True
+
+            clothes = list(info["poses"][pose]["clothes"].keys())
+            actions = {a for lst in info["poses"][pose]["clothes"].values() for a in lst}
+
+            self.ui.combo_clothes_select.clear()
+            if clothes:
+                self.ui.combo_clothes_select.addItems(clothes)
+
+            self.ui.combo_action_select.clear()
+            if actions:
+                self.ui.combo_action_select.addItems(sorted(actions))
+
+            self._init_emotion_combo()
+            self.ui.combo_emotion_select.setCurrentIndex(0)
+        finally:
+            self._pos_changing = False
+            self._update_psd_component()
+
+    def _update_psd_component(self):
+        """PSD 模式下，把当前 UI 值实时写回 preview_style"""
+        if not self._psd_info() or self._pos_changing:
+            return
+        
+        emo_idx = self.ui.combo_emotion_select.currentText()
+        updates = {
+            "pose":      self.ui.combo_poise_select.currentText(),
+            "clothing":  self.ui.combo_clothes_select.currentText(),
+            "action":    self.ui.combo_action_select.currentText(),
+            "emotion_index": emo_idx if emo_idx != "无可用表情" else "",
+            "overlay":   "__PSD__"
+        }
+        CONFIGS.update_preview_component(self.layer_index, updates)
+        
+        if not self._pos_changing and not self._ignore_signals:
+            self.config_changed.emit()
         
     def get_component_config(self):
         """获取当前图层的组件配置"""
@@ -314,55 +390,39 @@ class CharacterTabWidget(QWidget):
         self._ignore_signals = True
         
         try:
-            # 初始化角色下拉框
             self._init_character_combo()
-            
-            # 设置角色选择
+            # 角色
             if "character_name" in component_config:
                 char_id = component_config["character_name"]
-                self.current_character_id = char_id
-                current_text = f"{CONFIGS.get_character(char_id, full_name=True)} ({char_id})"
-                index = self.ui.combo_character_select.findText(current_text)
-                if index >= 0:
-                    self.ui.combo_character_select.setCurrentIndex(index)
-                else:
-                    # 如果找不到，默认选择第一个
-                    if self.ui.combo_character_select.count() > 0:
-                        self.ui.combo_character_select.setCurrentIndex(0)
             else:
-                # 如果没有设置角色，使用角色第二个
-                current_character = CONFIGS.character_list[1]
-                self.current_character_id = current_character
-                current_text = f"{CONFIGS.get_character(current_character, full_name=True)} ({current_character})"
-                index = self.ui.combo_character_select.findText(current_text)
-                if index >= 0:
-                    self.ui.combo_character_select.setCurrentIndex(index)
-                elif self.ui.combo_character_select.count() > 0:
-                    self.ui.combo_character_select.setCurrentIndex(0)
+                char_id = CONFIGS.character_list[1] if len(CONFIGS.character_list) > 1 else CONFIGS.character_list[0]
+            self.current_character_id = char_id
+            full_text = f"{CONFIGS.get_character(char_id, full_name=True)} ({char_id})"
+            idx = self.ui.combo_character_select.findText(full_text)
+            if idx >= 0:
+                self.ui.combo_character_select.setCurrentIndex(idx)
             
-            # 初始化表情下拉框（默认显示全部）
+            psd = self._psd_info()
+            if psd:
+                self._setup_psd_ui(psd)
+                self._on_psd_pose_changed(0)
+            else:
+                self._setup_normal_ui()
+
+            # 表情部分
             self._init_emotion_combo()
-            
-            # 设置是否使用固定表情
-            use_fixed_character = component_config.get("use_fixed_character", False)
-            emotion_index = component_config.get("emotion_index")
-            
-            # 设置随机表情状态
-            if not use_fixed_character or emotion_index is None:
+            use_fixed = component_config.get("use_fixed_character", False)
+            emotion_idx = component_config.get("emotion_index")
+            if not use_fixed or emotion_idx is None:
                 self.ui.checkbox_random_emotion.setChecked(True)
                 self.ui.combo_emotion_select.setEnabled(False)
             else:
                 self.ui.checkbox_random_emotion.setChecked(False)
                 self.ui.combo_emotion_select.setEnabled(True)
-                # 设置选中的表情索引
-                if emotion_index:
-                    # 获取当前过滤条件下的表情列表
-                    filter_name = self.ui.combo_emotion_filter.currentText()
-                    filtered_emotions = CONFIGS.get_filtered_emotions(self.current_character_id, filter_name)
-                    if emotion_index in filtered_emotions:
-                        idx = filtered_emotions.index(emotion_index)
-                        if 0 <= idx < self.ui.combo_emotion_select.count():
-                            self.ui.combo_emotion_select.setCurrentIndex(idx)
+                filter_name = self.ui.combo_emotion_filter.currentText()
+                filtered = CONFIGS.get_filtered_emotions(self.current_character_id, filter_name)
+                if emotion_idx in filtered:
+                    self.ui.combo_emotion_select.setCurrentIndex(filtered.index(emotion_idx))
         finally:
             # 恢复信号处理
             self._ignore_signals = False
@@ -379,59 +439,72 @@ class CharacterTabWidget(QWidget):
     
     def _init_emotion_combo(self, filter_name="全部"):
         """初始化表情下拉框，可按照筛选条件过滤"""
-        # 获取当前角色
-        current_char = self.current_character_id
-        if not current_char:
-            current_char = CONFIGS.get_character()
-        
-        # 获取筛选后的表情索引
-        filtered_emotions = CONFIGS.get_filtered_emotions(current_char, filter_name)
-        
-        # 创建表情列表
-        emotions = [f"表情 {i}" for i in filtered_emotions]
-        
-        self.ui.combo_emotion_select.clear()
-        if emotions:
-            self.ui.combo_emotion_select.addItems(emotions)
-        else:
-            self.ui.combo_emotion_select.addItem("无可用表情")
-        
-        # 根据是否勾选随机表情设置启用状态
-        if self.ui.checkbox_random_emotion.isChecked():
-            self.ui.combo_emotion_select.setEnabled(False)
-        else:
-            self.ui.combo_emotion_select.setEnabled(bool(emotions))
+        try:
+            self._ignore_signals = True
+
+            if self._psd_info():
+                pose = self.ui.combo_poise_select.currentText()
+                exprs = self._psd_info()["poses"].get(pose, {}).get("expressions", [])
+                self.ui.combo_emotion_select.clear()
+                self.ui.combo_emotion_select.addItems(exprs if exprs else ["无可用表情"])
+                self.ui.combo_emotion_select.setEnabled(
+                    bool(exprs) and not self.ui.checkbox_random_emotion.isChecked()
+                )
+                return
+
+            # 原普通角色逻辑保留
+            char = self.current_character_id or CONFIGS.get_character()
+            filtered = CONFIGS.get_filtered_emotions(char, filter_name)
+            emotions = [f"表情 {i}" for i in filtered]
+            self.ui.combo_emotion_select.clear()
+            self.ui.combo_emotion_select.addItems(emotions if emotions else ["无可用表情"])
+            self.ui.combo_emotion_select.setEnabled(
+                bool(emotions) and not self.ui.checkbox_random_emotion.isChecked()
+            )
+        finally:
+            self._ignore_signals = False
     
     def _connect_signals(self):
         """连接信号槽"""
         self.ui.combo_character_select.currentIndexChanged.connect(self.on_character_changed)
         self.ui.checkbox_random_emotion.toggled.connect(self.on_emotion_random_changed)
+    
+        self.ui.combo_emotion_select.currentIndexChanged.connect(self._update_psd_component)
+        self.ui.combo_clothes_select.currentIndexChanged.connect(self._update_psd_component)
+        self.ui.combo_action_select.currentIndexChanged.connect(self._update_psd_component)
+
+        self.ui.combo_poise_select.currentIndexChanged.connect(self._on_psd_pose_changed)
         self.ui.combo_emotion_select.currentIndexChanged.connect(self.on_emotion_changed)
         self.ui.combo_emotion_filter.currentIndexChanged.connect(self.on_emotion_filter_changed)
-    
+        
     def on_character_changed(self, index):
-        """角色改变事件"""
         if index < 0 or self._ignore_signals:
             return
 
         clear_cache()
-        
-        selected_text = self.ui.combo_character_select.currentText()
-        if "(" in selected_text and ")" in selected_text:
-            char_id = selected_text.split("(")[-1].rstrip(")")
-            self.current_character_id = char_id
+
+        updates = {"overlay":   ""}
+        CONFIGS.update_preview_component(self.layer_index, updates)
+
+        self._ignore_signals = True
+        try:
+            selected_text = self.ui.combo_character_select.currentText()
+            if "(" in selected_text and ")" in selected_text:
+                char_id = selected_text.split("(")[-1].rstrip(")")
+                self.current_character_id = char_id
+                CONFIGS.update_preview_component(self.layer_index,
+                                                 {"character_name": char_id})
+                psd = self._psd_info()
+                if psd:
+                    self._setup_psd_ui(psd)
+                    self._on_psd_pose_changed(1)
+                else:
+                    self._setup_normal_ui()
+                    self._init_emotion_combo()
+                    self.config_changed.emit()
+        finally:
+            self._ignore_signals = False
             
-            # 更新预览样式中的组件配置
-            CONFIGS.update_preview_component(self.layer_index, {
-                "character_name": char_id,
-            })
-            
-            # 更新表情下拉框
-            self._init_emotion_combo()
-            
-            # 发出配置改变信号
-            self.config_changed.emit()
-    
     def on_emotion_random_changed(self, checked):
         """表情随机选择改变"""
 

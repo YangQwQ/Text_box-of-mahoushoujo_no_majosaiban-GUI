@@ -1,5 +1,6 @@
 ﻿// image_loader.cpp
 
+#include <Windows.h>
 #include <algorithm>
 #include <cstring>
 #include <memory>
@@ -9,7 +10,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <Windows.h>
 
 // 计时用
 #define _DEBUG
@@ -31,9 +31,10 @@
 
 // 创建UTF-8字符串版本的括号对映射
 const std::unordered_map<std::string, std::string> lt_bracket_pairs = {{"\"", "\""}, {"[", "]"}, {"<", ">"}, {"【", "】"}, {"〔", "〕"}, {"「", "」"}, {"『", "』"}, {"〖", "〗"}, {"《", "》"}, {"〈", "〉"}, {"“", "”"}};
+// 全局：存 PSD 图
+static std::unordered_map<int, std::vector<uint8_t>> g_psd;
 
 // 简单的计时宏定义
-
 #define TIME_START_VAR(line, name) auto time_start_##line = std::chrono::high_resolution_clock::now()
 #define TIME_START(name) TIME_START_VAR(__LINE__, name)
 
@@ -609,26 +610,24 @@ public:
   bool InitSDL() {
     if (!sdl_initialized_) {
 #ifdef _WIN32
-        // 获取当前DLL的路径，然后设置其所在目录为搜索路径
-        HMODULE hModule = NULL;
-        if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-            (LPCTSTR)&ImageLoaderManager::GetInstance, &hModule)) {
-            wchar_t path[MAX_PATH];
-            GetModuleFileNameW(hModule, path, MAX_PATH);
+      // 获取当前DLL的路径，然后设置其所在目录为搜索路径
+      HMODULE hModule = NULL;
+      if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCTSTR)&ImageLoaderManager::GetInstance, &hModule)) {
+        wchar_t path[MAX_PATH];
+        GetModuleFileNameW(hModule, path, MAX_PATH);
 
-            // 移除文件名，只保留目录
-            wchar_t* lastSlash = wcsrchr(path, L'\\');
-            if (lastSlash) {
-                *lastSlash = L'\0';
+        // 移除文件名，只保留目录
+        wchar_t *lastSlash = wcsrchr(path, L'\\');
+        if (lastSlash) {
+          *lastSlash = L'\0';
 
-                if (SetDllDirectoryW(path)) {
-                    DEBUG_PRINT("Set DLL directory to: %ls", path);
-                }
-                else {
-                    DEBUG_PRINT("Failed to set DLL directory, error: %lu", GetLastError());
-                }
-            }
+          if (SetDllDirectoryW(path)) {
+            DEBUG_PRINT("Set DLL directory to: %ls", path);
+          } else {
+            DEBUG_PRINT("Failed to set DLL directory, error: %lu", GetLastError());
+          }
         }
+      }
 #endif
       if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         DEBUG_PRINT("SDL initialization failed: %s", SDL_GetError());
@@ -731,11 +730,18 @@ public:
     }
   }
 
-  LoadResult GeneratePreviewImage(int canvas_width, int canvas_height, const char *components_json, unsigned char **out_data, int *out_width, int *out_height) {
+  LoadResult GeneratePreviewImage(int canvas_width, int canvas_height, const char *components_json, unsigned char *image_data, int image_width, int image_height, int image_pitch, unsigned char **out_data, int *out_width, int *out_height) {
     TIME_SCOPE("Starting to generate preview image");
 
     if (!InitSDL()) {
       return LoadResult::SDL_INIT_FAILED;
+    }
+
+    // 如果有传入图像数据，使用它
+    SDL_Surface *external_image_surface = nullptr;
+    if (image_data && image_width > 0 && image_height > 0) {
+      external_image_surface = SDL_CreateRGBSurfaceWithFormatFrom(image_data, image_width, image_height, 32, image_pitch, SDL_PIXELFORMAT_ABGR8888);
+      DEBUG_PRINT("External image loaded: %dx%d", image_width, image_height);
     }
 
     // Parse JSON
@@ -743,6 +749,8 @@ public:
     if (!json_root || !cJSON_IsArray(json_root)) {
       DEBUG_PRINT("JSON parse error");
       cJSON_Delete(json_root);
+      if (external_image_surface)
+        SDL_FreeSurface(external_image_surface);
       return LoadResult::JSON_PARSE_ERROR;
     }
 
@@ -751,11 +759,13 @@ public:
     if (!canvas) {
       DEBUG_PRINT("Failed to create canvas: %s", SDL_GetError());
       cJSON_Delete(json_root);
+      if (external_image_surface)
+        SDL_FreeSurface(external_image_surface);
       return LoadResult::FAILED;
     }
 
     // Fill with transparent
-    // SDL_FillRect(canvas, nullptr, SDL_MapRGBA(canvas->format, 0, 0, 0, 0));
+    SDL_FillRect(canvas, nullptr, SDL_MapRGBA(canvas->format, 0, 0, 0, 0));
 
     // Check for cache mark
     bool has_cache_mark = static_layer_cache_first_ != nullptr;
@@ -794,9 +804,9 @@ public:
         continue;
 
       std::string type(GetJsonString(comp_obj, "type", ""));
+
       // 需要缓存图层
       if (!has_cache_mark) {
-
         // Determine if component is static
         bool is_static = false;
         if (type != "character" && type != "background")
@@ -819,7 +829,8 @@ public:
       if (type == "background") {
         draw_success = DrawBackgroundComponent(canvas, comp_obj);
       } else if (type == "character") {
-        draw_success = DrawCharacterComponent(canvas, comp_obj);
+        // 修改：传递外部图像数据给角色绘制函数
+        draw_success = DrawCharacterComponent(canvas, comp_obj, external_image_surface);
       } else if (type == "namebox") {
         draw_success = DrawNameboxComponent(canvas, current_static_segment, comp_obj);
       } else if (type == "text") {
@@ -840,6 +851,11 @@ public:
     }
 
     cJSON_Delete(json_root);
+
+    // 清理外部图像表面
+    if (external_image_surface) {
+      SDL_FreeSurface(external_image_surface);
+    }
 
     // Cache the generated image as preview (replace old preview)
     ClearPreviewCache();
@@ -1525,21 +1541,47 @@ private:
     return true;
   }
 
+  SDL_Surface *LoadCharacterImageFromMemory(const unsigned char *rgba, int width, int height) {
+    // 直接让 SDL 接管这块内存（注意：SDL 不会 free 它，只是读取）
+    return SDL_CreateRGBSurfaceWithFormatFrom((void *)rgba, width, height, 32, width * 4, SDL_PIXELFORMAT_ABGR8888);
+  }
+
   // 角色组件绘制
-  bool DrawCharacterComponent(SDL_Surface *target1, cJSON *comp_obj) {
-    const char *draw_char_name = "hiro";
-    int draw_emotion = 1;
+  bool DrawCharacterComponent(SDL_Surface *target1, cJSON *comp_obj, SDL_Surface *external_image_surface = nullptr) {
+    SDL_Surface *char_surface = nullptr;
 
-    draw_char_name = GetJsonString(comp_obj, "character_name", "");
-    draw_emotion = static_cast<int>(GetJsonNumber(comp_obj, "emotion_index", 1));
+    // 优先使用外部传入的图像数据
+    if (external_image_surface) {
+      char_surface = external_image_surface;
+      DEBUG_PRINT("Using external image surface: %dx%d", char_surface->w, char_surface->h);
+    }
+    // 其次检查是否有PSD模式的数据
+    else {
+      uint8_t *rgba = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(GetJsonNumber(comp_obj, "image_data_ptr", 0)));
+      if (rgba) {
+        int width = static_cast<int>(GetJsonNumber(comp_obj, "image_width", 0));
+        int height = static_cast<int>(GetJsonNumber(comp_obj, "image_height", 0));
+        DEBUG_PRINT("draw character from psd WH: %d %d", width, height);
+        char_surface = SDL_CreateRGBSurfaceWithFormatFrom((void *)rgba, width, height, 32, width * 4, SDL_PIXELFORMAT_ABGR8888);
+      } else {
+        const char *draw_char_name = "hiro";
+        int draw_emotion = 1;
 
-    if (!draw_char_name || strlen(draw_char_name) == 0 || draw_emotion <= 0) {
-      return false;
+        draw_char_name = GetJsonString(comp_obj, "character_name", "");
+        draw_emotion = static_cast<int>(GetJsonNumber(comp_obj, "emotion_index", 1));
+
+        if (!draw_char_name || strlen(draw_char_name) == 0 || draw_emotion <= 0) {
+          return false;
+        }
+
+        char_surface = LoadCharacterImage(draw_char_name, draw_emotion);
+      }
     }
 
-    SDL_Surface *char_surface = LoadCharacterImage(draw_char_name, draw_emotion);
-    if (!char_surface)
+    if (!char_surface) {
+      DEBUG_PRINT("Failed to load character image");
       return false;
+    }
 
     // 使用渲染器进行高质量缩放
     float comp_scale = static_cast<float>(GetJsonNumber(comp_obj, "scale", 1.0));
@@ -1554,7 +1596,10 @@ private:
 
       SDL_Surface *scaled_surface = ScaleSurfaceWithRenderer(char_surface, new_width, new_height);
       if (scaled_surface) {
-        SDL_FreeSurface(char_surface);
+        // 注意：如果char_surface是外部传入的，不应该释放它
+        if (!external_image_surface) {
+          SDL_FreeSurface(char_surface);
+        }
         final_surface = scaled_surface;
       }
     }
@@ -1573,7 +1618,11 @@ private:
     if (target1)
       SDL_BlitSurface(final_surface, nullptr, target1, &pos);
 
-    SDL_FreeSurface(final_surface);
+    // 注意：只释放我们创建的表面，不释放外部传入的表面
+    if (!external_image_surface && final_surface != char_surface) {
+      SDL_FreeSurface(final_surface);
+    }
+
     return true;
   }
 
@@ -2503,8 +2552,8 @@ void ImageLoaderManager::DrawTextAndEmojiToCanvas(SDL_Surface *canvas, const std
         }
 
         // 计算段与行的重叠部分
-        int overlap_start = seg_start >= line_start? seg_start:line_start;
-        int overlap_end = seg_end<= line_end?seg_end:line_end;
+        int overlap_start = seg_start >= line_start ? seg_start : line_start;
+        int overlap_end = seg_end <= line_end ? seg_end : line_end;
 
         if (overlap_start < overlap_end) {
           // 添加重叠部分到当前行
@@ -2536,7 +2585,7 @@ void ImageLoaderManager::DrawTextAndEmojiToCanvas(SDL_Surface *canvas, const std
 
   // 10. 绘制文本
   bool has_shadow = (config->shadow_offset_x != 0 || config->shadow_offset_y != 0);
-  
+
   // 解析对齐字符串，获取垂直对齐方式
   std::string align_str(config->text_align);
   std::string halign = "left"; // 默认水平左对齐
@@ -2674,9 +2723,8 @@ __declspec(dllexport) void update_style_config(const char *style_json) { image_l
 
 __declspec(dllexport) void clear_cache(const char *cache_type) { image_loader::ImageLoaderManager::GetInstance().ClearCache(cache_type); }
 
-__declspec(dllexport) int generate_complete_image(int canvas_width, int canvas_height, const char *components_json, unsigned char **out_data, int *out_width, int *out_height) {
-
-  return static_cast<int>(image_loader::ImageLoaderManager::GetInstance().GeneratePreviewImage(canvas_width, canvas_height, components_json, out_data, out_width, out_height));
+__declspec(dllexport) int generate_image(int w, int h, const char *json, unsigned char *image_data, int image_width, int image_height, int image_pitch, unsigned char **out, int *outW, int *outH) {
+  return static_cast<int>(image_loader::ImageLoaderManager::GetInstance().GeneratePreviewImage(w, h, json, image_data, image_width, image_height, image_pitch, out, outW, outH));
 }
 
 __declspec(dllexport) int draw_content_simple(const char *text, const char *emoji_json, unsigned char *image_data, int image_width, int image_height, int image_pitch, unsigned char **out_data, int *out_width, int *out_height) {

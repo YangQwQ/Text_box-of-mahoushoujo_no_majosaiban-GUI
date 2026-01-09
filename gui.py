@@ -76,6 +76,8 @@ class ManosabaMainWindow(QMainWindow):
         
         # 初始化角色和背景标签页
         self._init_components_tabs()
+        if self.background_tab is not None:
+            self.background_tab.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         
         # 设置预览区域支持鼠标交互
         self._setup_preview_interaction()
@@ -132,6 +134,7 @@ class ManosabaMainWindow(QMainWindow):
                         layer_index=bg_layer,
                         ui_controls=ui_controls
                     )
+
                     # 连接信号到更新预览
                     self.background_tab.config_changed.connect(self._bg_chara_Cfg_changed)
                     

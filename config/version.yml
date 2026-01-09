@@ -2,14 +2,16 @@
 # 版本信息配置
 
 # 当前版本号
-version: "2.0.8"
+version: "2.1.0"
 
 # 版本历史 记录的是exe的更新，并非代码的更新记录
 history:
-  - version: "2.0.6"
-    date: "2026-1-7"
+  - version: "2.1.0"
+    date: "2026-1-9"
     description:
       - "修复了更新检查时显示的发布时间没有加上时区的bug"
+      - "添加了角色 新海天"
+      - "添加了使用psd作为角色表情文件的功能"
   - version: "2.0.4"
     date: "2026-1-7"
     description:

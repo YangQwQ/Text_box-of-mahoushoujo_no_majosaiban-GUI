@@ -252,6 +252,12 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
             # Linux 支持
             return True
 
+    def compose_psd_chara(self, chara, pose, cloth, action, expr):
+        import os 
+        from utils.psd_utils import compose_image
+        psd_path = os.path.join(CONFIGS.ASSETS_PATH, "chara", chara, f"{chara}.psd")
+        return compose_image(psd_path, pose, cloth, action, expr)
+
     def generate_preview(self) -> tuple:
         """生成预览图片和相关信息"""
         st = time.time()
@@ -309,17 +315,30 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
                     elif ufc and emotion_index:
                         pass
                     else:
-                        # 在过滤范围内随机选择表情
-                        filter_name = component.get("emotion_filter", "全部")
-                        filtered_emotions = CONFIGS.get_filtered_emotions(character_name, filter_name)
-                        if filtered_emotions:
-                            emotion_index = random.choice(filtered_emotions)
+                        if component.get("overlay") == "__PSD__":
+                            pose = component.get("pose")
+                            clothing = component.get("clothing")
+                            action = component.get("action")
+
+                            psd_key = (character_name, pose, clothing, action, emotion_index)
+                            if psd_key not in CONFIGS.psd_surface_cache:
+                                CONFIGS.psd_surface_cache[psd_key] = self.compose_psd_chara(*psd_key)
+                            # 把 PIL 图塞进组件，让 DLL 把它当普通位图叠加
+                            component["__psd_image__"] = CONFIGS.psd_surface_cache[psd_key]
                         else:
-                            # 如果没有过滤表情，使用所有表情
-                            emotion_count = CONFIGS.mahoshojo.get(character_name, {}).get("emotion_count", 1)
-                            emotion_index = random.randint(1, emotion_count)
+                            # 在过滤范围内随机选择表情
+                            filter_name = component.get("emotion_filter", "全部")
+                            filtered_emotions = CONFIGS.get_filtered_emotions(character_name, filter_name)
+                            if filtered_emotions:
+                                emotion_index = random.choice(filtered_emotions)
+                            else:
+                                # 如果没有过滤表情，使用所有表情
+                                emotion_count = CONFIGS.mahoshojo.get(character_name, {}).get("emotion_count", 1)
+                                import traceback
+                                traceback.print_stack()
+                                emotion_index = random.randint(1, emotion_count)
                         
-                        component["emotion_index"] = emotion_index
+                            component["emotion_index"] = emotion_index
                     
                     # 收集角色信息
                     character_info = f"角色: {char_full_name}, 表情: ({emotion_index}) |"
@@ -360,7 +379,11 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
                 print(f"预览生成用时: {int((time.time()-st)*1000)}ms")
             else:
                 print("CPP端预览图生成失败")
-                
+            
+            # 预览返回前，清掉本次用到的 PSD 图
+            for comp in cp_components:
+                comp.pop("__psd_image__", None)
+            CONFIGS.psd_surface_cache.clear()
         except Exception as e:
             print(f"预览图生成出错: {e}")
             import traceback
@@ -369,7 +392,7 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
             info = f"错误: {str(e)}"
         
         return preview_image, info
-    
+
     def _create_empty_preview(self):
         """创建空的预览图像"""
         canvas_size = _calculate_canvas_size()

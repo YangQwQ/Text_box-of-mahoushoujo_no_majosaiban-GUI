@@ -86,6 +86,26 @@ class ConfigLoader:
 
         # 加载样式配置
         self._load_style_configs()
+        
+        # 加载psd信息
+        self.psd_meta = {}
+        self.psd_surface_cache = {}
+        self._load_psd_if_needed()
+
+    def _load_psd_if_needed(self):
+        """遍历角色，遇到 emotion_count==0 就去读同名 psd"""
+        from utils.psd_utils import inspect_psd
+        for chara_id, meta in self.mahoshojo.items():
+            if meta.get("emotion_count", 0) == 0:          # PSD 模式
+                psd_file = os.path.join(self.ASSETS_PATH, "chara", chara_id, f"{chara_id}.psd")
+                if os.path.isfile(psd_file):
+                    self.psd_meta[chara_id] = inspect_psd(psd_file)
+                else:
+                    print(f"[WARN] PSD文件不存在: {psd_file}")
+
+    def get_psd_info(self, chara_id):
+        """外部统一入口：返回该角色的 PSD 解析 dict，没有就返回 None"""
+        return self.psd_meta.get(chara_id)
 
     def _get_current_character_from_layers(self):
         """从角色图层组件获取当前角色（第一个非固定角色的图层）"""
