@@ -384,7 +384,7 @@ coco:
 sora:
   full_name: 新海天
   offset: [-200,1820]
-  scale: 0.55
+  scale: 0.56
   emotion_count: 0
   font: font3
   text:
@@ -392,9 +392,9 @@ sora:
       font_color: [137, 177, 251]
       font_size: 136
     - text: 海
-      font_size: 116
-    - text: 天
       font_size: 76
+    - text: 天
+      font_size: 116
 # 在下方添加新角色信息，依次为全名、表情差分数量、使用字体
 # 如：
 #   warden:

@@ -296,7 +296,7 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
         try:
             compress_layer = False
 
-            # 使用预览样式的组件数据
+            # 获取所有组件配置
             components = CONFIGS.get_sorted_preview_components()
             
             if not components:
@@ -312,13 +312,21 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
             character_info = ""
             background_info = ""
 
+            # 关键修改：获取UI组件引用
+            character_tab_widgets = {}
+            background_tab_widgets = {}
+            
+            if hasattr(self, 'gui') and hasattr(self.gui, 'get_character_tab_widgets'):
+                character_tab_widgets = self.gui.get_character_tab_widgets()
+            
+            if hasattr(self, 'gui') and hasattr(self.gui, 'get_background_tab_widgets'):
+                background_tab_widgets = self.gui.get_background_tab_widgets()
+
             # 确定每个组件的具体参数
             for component in components:
                 if not component.get("enabled", True):
                     continue
                 
-                ufc = component.get("use_fixed_character", False)
-                ufb = component.get("use_fixed_background", False)
                 comp_type = component.get("type")
 
                 # 图层缓存
@@ -335,47 +343,63 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
                     # 添加角色文本配置
                     if current_character_name in CONFIGS.mahoshojo:
                         component["textcfg"] = CONFIGS.mahoshojo[current_character_name]["text"]
-                        component["font_name"] = "font3"
+                        component["font_name"] = CONFIGS.mahoshojo[current_character_name]["font"]
+                
                 elif comp_type == "character":
-                    character_name = component.get("character_name", current_character_name)
-                    emotion_index = component.get("emotion_index")
+                    # 关键修改：完全从UI组件获取值
+                    layer_index = component.get("layer", 1)
+                    ui_values = None
                     
-                    # 检查是否有强制使用标记
-                    force_use = component.get("force_use", False)
-                    if force_use:
-                        component.pop("force_use", None)
+                    # 默认值
+                    character_name = current_character_name
+                    emotion_index = 1
+                    use_fixed = False
+
+                    # 从UI组件获取最新值
+                    if layer_index in character_tab_widgets:
+                        ui_values = character_tab_widgets[layer_index].get_current_values()
+                        character_name = ui_values.get("character_name", character_name)
+                        emotion_index = ui_values.get("emotion_index", emotion_index)
+                        emo_list = ui_values.get("emotion_list", [])
+                        use_fixed = ui_values.get("use_fixed_character", False)
+                    if not ui_values:
+                        raise ValueError("无法获取角色UI组件值")
 
                     char_full_name = CONFIGS.mahoshojo.get(character_name, {}).get("full_name", character_name)
 
-                    if component.get("overlay") == "__PSD__":
-                        pose = component.get("pose")
-                        clothing = component.get("clothing")
-                        action = component.get("action")
-
-                        if not force_use and not ufc:
-                            emo_list = CONFIGS.get_psd_info(character_name)["poses"].get(pose, {}).get("expressions", [])
-                            if emo_list:
-                                emotion_index = random.choice(emo_list)
-                                print(f"随机选择表情: {emotion_index}")
+                    # 检查是否为PSD角色
+                    psd_info = CONFIGS.get_psd_info(character_name)
+                    
+                    if psd_info:
+                        # ui_values = character_tab_widgets[layer_index].get_current_values()
+                        pose = ui_values.get("pose", "")
+                        clothing = ui_values.get("clothing")
+                        action = ui_values.get("action")
+                        
+                        # 随机选择表情（如果不是固定）
+                        if not use_fixed and emo_list:
+                            emotion_index = random.choice(emo_list)
+                            print(f"随机选择表情: {emotion_index}")
 
                         psd_key = (character_name, pose, clothing, action, emotion_index)
                         if psd_key not in CONFIGS.psd_surface_cache:
                             CONFIGS.psd_surface_cache[psd_key] = self.compose_psd_chara(*psd_key)
                         component["__psd_image__"] = CONFIGS.psd_surface_cache[psd_key]
+                        component["overlay"] = "__PSD__"
+
+                        print(f"PSD 组件: {character_name}, 姿势: {pose}, 服装: {clothing}, 动作: {action}, 表情: {emotion_index}\n")
                     else:
-                        if not force_use and not ufc:
-                            # 在过滤范围内随机选择表情
-                            filter_name = component.get("emotion_filter", "全部")
+                        if not use_fixed:
+                            filter_name = ui_values.get("emotion_filter", "全部")
+                            
                             filtered_emotions = CONFIGS.get_filtered_emotions(character_name, filter_name)
                             if filtered_emotions:
                                 emotion_index = random.choice(filtered_emotions)
                             else:
-                                # 如果没有过滤表情，使用所有表情
-                                emotion_count = CONFIGS.mahoshojo.get(character_name, {}).get("emotion_count", 1)
-                                emotion_index = random.randint(1, emotion_count)
-                    
+                                emotion_index = 1
+                        
                     component["emotion_index"] = emotion_index
-                    
+                        
                     # 收集角色信息
                     character_info = f"角色: {char_full_name}, 表情: ({emotion_index}) |"
                     
@@ -390,19 +414,23 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
                     
                     component["offset_x1"] = emotion_offsets_X.get(str(emotion_index), 0) + offset[0]
                     component["offset_y1"] = emotion_offsets_Y.get(str(emotion_index), 0) + offset[1]
-                    
+                
                 elif comp_type == "background":
-                    overlay = component.get("overlay", "")
-                    if ufb and overlay:
-                        if overlay.startswith("#"):
-                            background_info = f"纯色背景: {overlay} |"
-                        else:
-                            background_info = f"固定背景: {overlay} |"
-                    else:
+                    # 完全从UI获取值
+                    layer_index = component.get("layer", 0)
+                    
+                    bg_widget = background_tab_widgets[layer_index]
+                    overlay = bg_widget.get_overlay_value() or ""
+                    use_fixed = bg_widget.is_fixed_background()
+
+                    print(f"背景设置: 固定: {use_fixed}, 选择: {overlay}")
+                    if not (use_fixed and overlay):
+                        # 使用随机背景
                         if len(CONFIGS.background_list) > 0:
                             overlay = random.choice(CONFIGS.background_list)
-                            component["overlay"] = overlay
-                            background_info = f"随机背景: {overlay} |"
+                    background_info = f"背景: {overlay} |"
+                    component["overlay"] = overlay
+
                 cp_components.append(component)
             
             # 使用DLL生成图像

@@ -11,7 +11,7 @@
     overlay: 12 多功能厅.webp
     type: background
   - align: bottom-left
-    character_name: hiro
+    character_name: ema
     enabled: true
     layer: 1
     name: 角色立绘
@@ -21,19 +21,19 @@
     type: character
   - align: bottom-center
     enabled: true
-    layer: 3
+    layer: 2
     name: 文本框
     overlay: 文本框1.webp
     type: extra
   - align: bottom-left
     enabled: true
-    layer: 4
+    layer: 3
     offset_x: 200
     offset_y: -300
     overlay: 名字框.webp
     type: namebox
   - enabled: true
-    layer: 5
+    layer: 4
     name: 书图标
     offset_x: 20
     offset_y: 20
@@ -41,19 +41,19 @@
     type: extra
   - align: top-right
     enabled: true
-    layer: 6
+    layer: 5
     name: 右上背景
     overlay: 枝叶-右上.webp
     type: extra
   - align: top-right
     enabled: true
-    layer: 7
+    layer: 6
     name: 设置图标
     overlay: 齿轮-右上.webp
     type: extra
   - align: bottom-left
     enabled: true
-    layer: 8
+    layer: 7
     name: Auto图标
     offset_y: -25
     overlay: Auto off-左下.webp

@@ -110,9 +110,9 @@ class HotkeyManager(QObject):
     def _find_first_switchable_character_tab(self):
         """找到第一个可切换的角色标签页（非固定角色）"""
         for tab in self.gui.character_tabs:
-            component_config = tab.get_component_config()
-            if component_config and not component_config.get("use_fixed_character", False):
+            if not tab.is_fixed_character():
                 return tab
+
         # 如果没有找到非固定角色标签页，返回第一个角色标签页
         if self.gui.character_tabs:
             return self.gui.character_tabs[0]
@@ -122,11 +122,6 @@ class HotkeyManager(QObject):
         """切换角色 - 修改对应标签页的下拉框"""
         tab = self._find_first_switchable_character_tab()
         if not tab:
-            return
-        
-        # 获取当前角色ID
-        component_config = tab.get_component_config()
-        if not component_config:
             return
         
         # 计算新角色索引
@@ -156,10 +151,6 @@ class HotkeyManager(QObject):
         """切换表情 - 修改对应标签页的下拉框"""
         tab = self._find_first_switchable_character_tab()
         if not tab:
-            return
-        
-        component_config = tab.get_component_config()
-        if not component_config:
             return
         
         # 计算新表情索引

@@ -34,6 +34,7 @@ class ManosabaMainWindow(QMainWindow):
         
         # 初始化核心
         self.core = ManosabaCore()
+        self.core.gui = self
 
         # 连接信号到槽
         self.core.status_updated.connect(self.update_status)
@@ -596,6 +597,24 @@ class ManosabaMainWindow(QMainWindow):
             for item in scene.items():
                 if hasattr(item, 'is_highlight_rect') and item.is_highlight_rect:
                     scene.removeItem(item)
+    
+    def get_character_tab_widgets(self):
+        """返回所有角色标签页的引用"""
+        widgets = {}
+        # 修复：通过 self.ui 访问 tabWidget_Layer
+        for i in range(self.ui.tabWidget_Layer.count()):
+            widget = self.ui.tabWidget_Layer.widget(i)
+            if isinstance(widget, CharacterTabWidget):
+                widgets[widget.layer_index] = widget
+        return widgets
+
+    def get_background_tab_widgets(self):
+        """背景标签页的引用"""
+        widgets = {}
+        # 修复：直接返回存储的 background_tab 实例，而不是遍历标签页
+        if hasattr(self, 'background_tab') and self.background_tab is not None:
+            widgets[self.background_tab.layer_index] = self.background_tab
+        return widgets
                     
 def main():
     """主函数"""

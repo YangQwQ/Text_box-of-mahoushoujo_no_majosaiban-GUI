@@ -220,10 +220,8 @@ class ConfigLoader:
             self._init_preview_style()
             
             # 如果使用角色颜色作为强调色，更新强调色
-            self.update_bracket_color_from_character()
-
-            # 更新DLL配置
-            update_style_config(self.style)
+            if not self.update_bracket_color_from_character():
+                update_style_config(self.style)
             
             # 保存上次选择的样式到GUI设置
             self.gui_settings["last_style"] = style_name
@@ -266,7 +264,7 @@ class ConfigLoader:
     def update_bracket_color_from_character(self):
         """根据当前角色的文本颜色更新强调色"""
         if not self.style.use_character_color:
-            return
+            return False
         
         character_name = self.get_character()
         print("当前角色：", character_name)  # 调试输出
@@ -278,6 +276,8 @@ class ConfigLoader:
             self.style.bracket_color = f"#{font_color[0]:02x}{font_color[1]:02x}{font_color[2]:02x}"
             #单独更新括号颜色
             update_style_config(self.style)
+            return True
+        return False
 
     def _load_config(self, config_type: str, *args) -> Any:
         """
@@ -507,9 +507,9 @@ class ConfigLoader:
         return self._save_yaml_file("process_whitelist.yml", existing_data)
         
     def save_gui_settings(self):
-        """保存GUI设置到settings.yml（仅更新变化的部分）"""
+        """保存GUI设置到settings.yml"""
         # 加载现有配置
-        existing_data = self._load_yaml_file("settings.yml")
+        existing_data = self._load_yaml_file("settings.yml") or {}
         
         # 没有变化就返回个False
         if json.dumps(existing_data, sort_keys=True) == json.dumps(self.gui_settings, sort_keys=True):

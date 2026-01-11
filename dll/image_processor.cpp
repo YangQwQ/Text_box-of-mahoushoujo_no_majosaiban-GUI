@@ -12,7 +12,7 @@
 #include <vector>
 
 // 计时用
-#define _DEBUG
+//#define _DEBUG
 #ifdef _DEBUG
 #include <chrono>
 #define DEBUG_PRINT(fmt, ...) printf("[DEBUG] " fmt "\n", ##__VA_ARGS__)

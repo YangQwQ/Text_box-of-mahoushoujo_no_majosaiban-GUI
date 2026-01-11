@@ -7,7 +7,33 @@ psd_tooli.py
 inspect_psd(path:str) -> dict
 compose_image(path:str, pose:str, clothing:str|None=None,
               action:str|None=None, expression:str|None=None) -> PIL.Image
+
+目前支持以下图层结构：
+A:
+姿态/
+├── 站立/
+│   └── 表情/
+└── 坐下/
+服装/
+├── 校服
+└── 便服
+动作/
+├── 跑
+└── 跳
+
+B:
+姿态/
+├── 站立/
+│   ├── 服装/
+│   │   ├── 校服/
+│   │   ├── 便服/
+│   │   └── 动作/
+│   │        ├── 跑/
+│   │        └── 跳/
+│   └── 表情/
+
 """
+
 from __future__ import annotations
 
 import threading
@@ -19,7 +45,7 @@ from PIL import Image
 
 # ---------- 缓存 ----------
 _CACHE_LOCK = threading.RLock()
-_CACHE_SIZE = 8  # 最多缓存 8 个 PSD 文件，可按需调大
+_CACHE_SIZE = 8
 
 
 @lru_cache(maxsize=_CACHE_SIZE)
@@ -44,8 +70,19 @@ def _find_group(parent, name: str):
 
 
 def _leaf_names(group) -> List[str]:
-    """返回组内所有"非组"图层的干净名字列表"""
-    return [_clean(l.name) for l in group.descendants() if not l.is_group()]
+    """返回组内所有"非组"图层的干净名字列表
+    Args:
+        group: 图层组
+        exclude_special: 是否排除名称以 BASE 或 FORE 开头的图层
+    """
+    names = []
+    for layer in group.descendants():
+        if not layer.is_group():
+            clean_name = _clean(layer.name)
+            if clean_name.startswith("BASE") or clean_name.startswith("FORE"):
+                continue
+            names.append(clean_name)
+    return names
 
 
 def _alpha_composite(base: Image.Image, overlay: Image.Image, position: tuple) -> Image.Image:
@@ -56,17 +93,16 @@ def _alpha_composite(base: Image.Image, overlay: Image.Image, position: tuple) -
     position: 上层图像在底图中的位置 (x, y)
     """
     x, y = position
-    # 创建一个与底图相同大小的临时图像
     temp = Image.new('RGBA', base.size, (0, 0, 0, 0))
-    # 将上层图像放到临时图像的正确位置
     temp.paste(overlay, (x, y))
-    # 使用alpha混合
     return Image.alpha_composite(base, temp)
 
 
 # ---------- 1. 解析 ----------
 def inspect_psd(path: str) -> dict:
     """
+    增强版PSD解析，支持灵活的图层结构
+    
     返回结构
     {
       "poses": {
@@ -74,47 +110,228 @@ def inspect_psd(path: str) -> dict:
           "clothes": {
             "<cloth_name>": ["action1", "action2", ...]   # 空列表表示无动作
           },
-          "expressions": ["expr1", "expr2", ...]
+          "expressions": ["expr1", "expr2", ...],
+          "clothes_source": "pose" | "global",           # 服装来源
+          "actions_source": "pose" | "global" | "none"   # 动作来源
         }
-      }
+      },
+      "global_clothes": {                              # 全局服装（如果存在）
+        "<cloth_name>": ["action1", ...]
+      },
+      "global_actions": ["action1", "action2", ...]    # 全局动作（如果存在）
     }
     """
     psd = _load_psd(path)
+    
+    # 查找顶层组
+    top_clothes_root = _find_group(psd, "服装")
+    top_actions_root = _find_group(psd, "动作")
     pose_root = _find_group(psd, "姿态")
+    
     if pose_root is None:
         raise ValueError("PSD 顶层未找到名字以'姿态'开头的组")
-
+    
+    # 解析全局服装（结构A）
+    global_clothes = {}
+    if top_clothes_root:
+        for item in top_clothes_root:
+            cloth_name = _clean(item.name)
+            if item.is_group():
+                # 服装组内可能包含动作子组
+                actions = _leaf_names(item)
+                global_clothes[cloth_name] = actions
+            else:
+                global_clothes[cloth_name] = []
+    
+    # 解析全局动作（结构A）
+    global_actions = []
+    if top_actions_root:
+        global_actions = _leaf_names(top_actions_root)
+    
+    # 解析姿态组（支持结构B）
     poses: Dict[str, dict] = {}
     for pose_grp in pose_root:
         if not pose_grp.is_group():
             continue
+        
         pose_name = _clean(pose_grp.name)
-        cloth_dict: Dict[str, List[str]] = {}
-        expr_list: List[str] = []
-
-        # --- 服装 ---
-        cloth_root = _find_group(pose_grp, "服装")
-        if cloth_root:
-            for item in cloth_root:
+        
+        # 查找姿态内的组
+        pose_clothes_root = _find_group(pose_grp, "服装")
+        pose_actions_root = _find_group(pose_grp, "动作")
+        expr_root = _find_group(pose_grp, "表情")
+        
+        # 确定服装来源：优先使用姿态内的，否则使用全局的
+        if pose_clothes_root:
+            # 姿态内有服装组（结构B）
+            clothes_source = "pose"
+            clothes_dict: Dict[str, List[str]] = {}
+            for item in pose_clothes_root:
                 cloth_name = _clean(item.name)
                 if item.is_group():
-                    # 把子层里的非组图层当动作
                     actions = _leaf_names(item)
+                    clothes_dict[cloth_name] = actions
                 else:
-                    actions = []  # 单层服装，无动作
-                cloth_dict[cloth_name] = actions
+                    clothes_dict[cloth_name] = []
+        elif global_clothes:
+            # 使用全局服装（结构A）
+            clothes_source = "global"
+            clothes_dict = global_clothes
+        else:
+            # 没有服装
+            clothes_source = "global"
+            clothes_dict = {}
+        
+        # 确定动作来源
+        if pose_clothes_root and any(pose_clothes_root.descendants()):
+            # 动作在服装组内（结构B的子情况）
+            actions_source = "pose"
+        elif pose_actions_root:
+            # 动作直接在姿态下（结构B的变体）
+            actions_source = "pose"
+        elif global_actions:
+            # 使用全局动作（结构A）
+            actions_source = "global"
+        else:
+            actions_source = "none"
+        
+        # 获取表情列表
+        expressions = _leaf_names(expr_root) if expr_root else []
+        
+        poses[pose_name] = {
+            "clothes": clothes_dict,
+            "expressions": expressions,
+            "clothes_source": clothes_source,
+            "actions_source": actions_source
+        }
+    
+    return {
+        "poses": poses,
+        "global_clothes": global_clothes if global_clothes else {},
+        "global_actions": global_actions if global_actions else {}
+    }
 
-        # --- 表情 ---
-        expr_root = _find_group(pose_grp, "表情")
-        if expr_root:
-            expr_list = _leaf_names(expr_root)
 
-        poses[pose_name] = {"clothes": cloth_dict, "expressions": expr_list}
+def _get_psd_path(chara_id: str) -> str:
+    """获取角色PSD文件路径"""
+    from config import CONFIGS
+    import os
+    return os.path.join(CONFIGS.ASSETS_PATH, "chara", chara_id, f"{chara_id}.psd")
 
-    return {"poses": poses}
 
+def get_pose_options(chara_id: str) -> List[str]:
+    """获取角色的所有姿态选项"""
+    from config import CONFIGS
+    psd_info = CONFIGS.get_psd_info(chara_id)
+    return list(psd_info["poses"].keys()) if psd_info else []
+
+
+def get_clothing_action_options(chara_id: str, pose: str) -> tuple[List[str], List[str]]:
+    """
+    获取指定姿态下的服装和动作列表
+    返回: (服装列表, 动作列表)
+    """
+    from config import CONFIGS
+    psd_info = CONFIGS.get_psd_info(chara_id)
+    if not psd_info:
+        return [], []
+    
+    pose_info = psd_info["poses"].get(pose, {})
+    
+    # 获取服装列表
+    clothes = list(pose_info.get("clothes", {}).keys()) if pose_info.get("clothes") else []
+    
+    # 获取动作列表（去重）
+    actions = set()
+    if pose_info.get("actions_source") == "pose":
+        # 从服装组内收集
+        for clothing_actions in pose_info.get("clothes", {}).values():
+            actions.update(clothing_actions)
+        # 从姿态直接收集
+        psd = _load_psd(_get_psd_path(chara_id))
+        pose_root = _find_group(psd, "姿态")
+        if pose_root:
+            pose_grp = next((g for g in pose_root if _clean(g.name) == pose), None)
+            if pose_grp:
+                pose_actions = _find_group(pose_grp, "动作")
+                if pose_actions:
+                    actions.update(_leaf_names(pose_actions))
+    elif pose_info.get("actions_source") == "global" and psd_info.get("global_actions"):
+        actions.update(psd_info["global_actions"])
+    
+    return clothes, sorted(list(actions))
+
+
+def get_emotion_filter_emotion_options(chara_id: str, pose: str, clothing: str = None) -> tuple[List[str], Dict[str, List[str]]]:
+    """
+    获取表情筛选选项和对应的表情列表
+    返回: (筛选器列表, {筛选器名称: 表情列表})
+    """
+    from config import CONFIGS
+    psd_info = CONFIGS.get_psd_info(chara_id)
+    if not psd_info:
+        return [], {}
+    
+    # 获取表情根组
+    psd = _load_psd(_get_psd_path(chara_id))
+    pose_root = _find_group(psd, "姿态")
+    if not pose_root:
+        return [], {}
+    
+    pose_grp = next((g for g in pose_root if g.is_group() and _clean(g.name) == pose), None)
+    if not pose_grp:
+        return [], {}
+    
+    # 优先检查服装层级
+    if clothing:
+        pose_clothes_root = _find_group(pose_grp, "服装")
+        if pose_clothes_root:
+            target_cloth = next((item for item in pose_clothes_root if _clean(item.name) == clothing), None)
+            if target_cloth and target_cloth.is_group():
+                cloth_expr_root = _find_group(target_cloth, "表情")
+                if cloth_expr_root:
+                    return _extract_emotion_filters(cloth_expr_root)
+    
+    # 检查姿态层级
+    expr_root = _find_group(pose_grp, "表情")
+    if expr_root:
+        return _extract_emotion_filters(expr_root)
+    
+    return [], {}
+
+
+def _extract_emotion_filters(expr_root) -> tuple[List[str], Dict[str, List[str]]]:
+    """从表情组提取筛选器和表情列表"""
+    subgroups = [g for g in expr_root if g.is_group()]
+    
+    if subgroups:
+        # 有子组，作为筛选器
+        filters = []
+        options = {}
+        
+        for subgroup in subgroups:
+            filter_name = _clean(subgroup.name)
+            filters.append(filter_name)
+            options[filter_name] = _leaf_names(subgroup)
+        
+        # 添加"全部"选项
+        if filters:
+            filters.insert(0, "全部")
+            all_emotions = []
+            for emo_list in options.values():
+                all_emotions.extend(emo_list)
+            options["全部"] = sorted(list(set(all_emotions)))
+        
+        return filters, options
+    else:
+        # 无子组，直接是表情列表
+        emotions = _leaf_names(expr_root)
+        return ["全部"], {"全部": emotions}
+
+# ---------- 2. 合成 ----------
 
 def _layer_topil(layer):
+    """兼容不同版本的psd-tools"""
     if hasattr(layer, 'topil'):
         return layer.topil()
     return layer.composite()
@@ -123,103 +340,169 @@ def _layer_topil(layer):
 def compose_image(path: str, pose: str,
                   clothing: Optional[str] = None,
                   action: Optional[str] = None,
-                  expression: Optional[str] = None) -> Image.Image:
+                  expression: Optional[str] = None,
+                  filter_name: Optional[str] = None) -> Image.Image:
+    """
+    重构后的图像合成函数 - 深度优先遍历版本
+    只合成指定的图层 + 在选项层级中发现的BASE/FORE图层
+    """
     psd = _load_psd(path)
-    # 1. 拿到姿态组
+    psd_info = inspect_psd(path)
+    
     pose_root = _find_group(psd, "姿态")
-    pose_grp = next((g for g in pose_root if g.is_group() and _clean(g.name) == pose), None)
-    if pose_grp is None:
-        raise ValueError(f"姿态 {pose} 不存在")
-
-    # 2. 收集需要显示的图层
-    # 使用列表来存储，每个元素是(layer, is_expression)元组
-    layers_to_render = []
-
-    # 2.1 姿态组里除"服装/表情"外的所有叶子层
-    for lyr in pose_grp.descendants():
-        if lyr.is_group():
-            continue
-        if any(_clean(lyr.parent.name).startswith(sw) for sw in ("服装", "表情")):
-            continue
-        layers_to_render.append((lyr, False))  # 不是表情图层
-
-    # 2.2 服装
-    if clothing:
-        cloth_root = _find_group(pose_grp, "服装")
-        target = next((item for item in cloth_root if _clean(item.name) == clothing), None)
-        if target is None:
-            raise ValueError(f"服装 {clothing} 不存在")
-        if target.is_group() and action:
-            found = next((sub for sub in target if _clean(sub.name) == action), None)
-            if found is None:
-                raise ValueError(f"动作 {action} 不存在")
-            # 添加动作组内的所有图层
-            for lyr in found.descendants():
-                if not lyr.is_group():
-                    layers_to_render.append((lyr, False))
-        else:
-            # 添加服装组或服装图层
-            if target.is_group():
-                for lyr in target.descendants():
-                    if not lyr.is_group():
-                        layers_to_render.append((lyr, False))
+    if not pose_root:
+        raise ValueError("PSD中未找到姿态组")
+    
+    # 双栈：基础栈和顶层栈
+    base_stack = []  # 基础图层（按顺序合成）
+    fore_stack = []  # 顶层图层（最后覆盖）
+    
+    # 标志位：记录是否已经处理了各个选项
+    found_pose = False
+    found_clothing = False
+    found_action = False
+    found_expression = False
+    
+    # 收集所有符合条件的图层 - 深度优先遍历
+    def collect_layers(group, is_fore=False):
+        """深度优先遍历，只进入选中的选项组，同时收集BASE/FORE"""
+        nonlocal found_pose, found_clothing, found_action, found_expression
+        
+        for layer in group:
+            layer_name = _clean(layer.name)
+            
+            if layer.is_group():
+                # 处理BASE和FORE组
+                if layer_name.startswith("BASE"):
+                    # BASE组内的内容加入基础栈
+                    for child in layer.descendants():
+                        if not child.is_group():
+                            base_stack.append((child, False))
+                    # 继续递归BASE组内的组（理论上不应该有，但以防万一）
+                    collect_layers(layer, False)
+                    continue
+                elif layer_name.startswith("FORE"):
+                    # FORE组内的内容加入顶层栈
+                    for child in layer.descendants():
+                        if not child.is_group():
+                            fore_stack.append((child, False))
+                    # 继续递归FORE组内的组
+                    collect_layers(layer, True)
+                    continue
+                
+                # 处理选项组
+                if layer_name.startswith("姿态") and not found_pose:
+                    # 进入选中的姿态
+                    target_pose = next((p for p in layer if _clean(p.name) == pose), None)
+                    if target_pose and target_pose.is_group():
+                        found_pose = True
+                        # 收集姿态下的直接图层（不属于任何选项组）
+                        for child in target_pose:
+                            if not child.is_group():
+                                base_stack.append((child, False))
+                        # 在姿态组内继续查找其他选项和BASE/FORE
+                        collect_layers(target_pose, is_fore)
+                    continue
+                
+                elif layer_name.startswith("服装") and not found_clothing and clothing:
+                    # 进入选中的服装
+                    target_cloth = next((c for c in layer if _clean(c.name) == clothing), None)
+                    if target_cloth:
+                        found_clothing = True
+                        if target_cloth.is_group():
+                            # 收集服装下的所有图层（但不包括选项组）
+                            for child in target_cloth:
+                                if not child.is_group():
+                                    base_stack.append((child, False))
+                                elif child.name.startswith(("BASE", "FORE")):
+                                    # 在服装组内继续查找BASE/FORE
+                                    collect_layers(child, is_fore)
+                        else:
+                            base_stack.append((target_cloth, False))
+                    continue
+                
+                elif layer_name.startswith("动作") and not found_action and action:
+                    # 进入选中的动作
+                    target_action = next((a for a in layer if _clean(a.name) == action), None)
+                    if target_action:
+                        found_action = True
+                        if target_action.is_group():
+                            for child in target_action:
+                                if not child.is_group():
+                                    base_stack.append((child, False))
+                                elif child.name.startswith(("BASE", "FORE")):
+                                    collect_layers(child, is_fore)
+                        else:
+                            base_stack.append((target_action, False))
+                    continue
+                
+                elif layer_name.startswith("表情") and not found_expression and expression:
+                    # 在表情组中查找选中的表情
+                    found_expression = True
+                    
+                    # 检查是否有子组（表情筛选）
+                    subgroups = [g for g in layer if g.is_group()]
+                    if subgroups:
+                        # 有子组，查找包含目标表情的子组
+                        for subgroup in subgroups:
+                            # 在子组中查找目标表情
+                            found_target_in_subgroup = False
+                            for child in subgroup:
+                                if not child.is_group() and _clean(child.name) == expression:
+                                    fore_stack.append((child, True))
+                                    found_target_in_subgroup = True
+                                    break
+                            
+                            if found_target_in_subgroup:
+                                # 只在当前子组内查找BASE/FORE图层（不递归）
+                                for child in subgroup:
+                                    if not child.is_group() and child.name.startswith(("BASE", "FORE")):
+                                        fore_stack.append((child, True))
+                                # 找到目标表情后，跳出循环，不再检查其他子组
+                                break
+                    else:
+                        # 无子组，直接查找
+                        for child in layer:
+                            if not child.is_group() and _clean(child.name) == expression:
+                                fore_stack.append((child, True))
+                            elif not child.is_group() and child.name.startswith(("BASE", "FORE")):
+                                fore_stack.append((child, True))
+                    continue
+                
+                # 对于其他组，如果已经在某个选项内部，继续递归查找BASE/FORE
+                elif found_pose or found_clothing or found_action or found_expression:
+                    collect_layers(layer, is_fore)
+            
             else:
-                layers_to_render.append((target, False))
-
-    # 2.3 表情
-    if expression:
-        expr_root = _find_group(pose_grp, "表情")
-        if expr_root:
-            found = next((lyr for lyr in expr_root.descendants()
-                        if not lyr.is_group() and _clean(lyr.name) == expression), None)
-            if found is None:
-                print(f"表情 {expression} 不存在")
-            else:
-                layers_to_render.append((found, True))  # 是表情图层，需要alpha混合
-
-    # 3. 按照图层的top值排序（从底层到顶层）
-    layers_to_render.sort(key=lambda x: x[0].top)
-
-    # 4. 渲染图层
+                # 普通图层
+                # 如果已经在选项组内或者是BASE/FORE的直接子图层，加入栈
+                if found_pose or found_clothing or found_action or found_expression or is_fore:
+                    layer_info = (layer, False)
+                    (fore_stack if is_fore else base_stack).append(layer_info)
+    
+    # 从PSD根开始深度遍历
+    collect_layers(psd)
+    
+    # 按图层顺序排序
+    # base_stack.sort(key=lambda x: x[0].top)
+    # fore_stack.sort(key=lambda x: x[0].top)
+    
+    # 合成图像
     w, h = psd.size
     canvas = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     
-    for layer, is_expression in layers_to_render:
+    # 合成基础栈
+    for layer, needs_alpha in base_stack:
         im = _layer_topil(layer)
-        if im is None:
-            continue
-            
-        l, t, _, _ = layer.bbox
-        
-        if is_expression:
-            # 对表情图层使用alpha混合
+        if im:
+            l, t, _, _ = layer.bbox
             canvas = _alpha_composite(canvas, im, (l, t))
-        else:
-            # 其他图层使用原来的paste方式
-            canvas.paste(im, (l, t), im)
+    
+    # 合成顶层栈
+    for layer, needs_alpha in fore_stack:
+        im = _layer_topil(layer)
+        if im:
+            l, t, _, _ = layer.bbox
+            canvas = _alpha_composite(canvas, im, (l, t))
     
     return canvas
-
-
-# ---------- demo ----------
-# if __name__ == "__main__":
-#     import time
-#     psd_path = r"assets/chara/sora/sora.psd"
-#     print("--- 解析 ---")
-#     st = time.time()
-#     info = inspect_psd(psd_path)
-#     from pprint import pprint
-#     pprint(info, width=120)
-# 
-#     print(f"耗时 {time.time() - st:.3f} 秒")
-#     print("--- 合成 ---")
-#     st = time.time()
-#     img = compose_image(
-#         psd_path,
-#         pose="左向",
-#         clothing="校服",
-#         action="",
-#         expression="无语",
-#     )
-#     print(f"耗时 {time.time() - st:.3f} 秒")
-#     img.show()

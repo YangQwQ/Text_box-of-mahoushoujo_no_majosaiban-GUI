@@ -308,7 +308,16 @@ class ComponentEditor(QGroupBox):
         pose_data = psd_info["poses"][pose]
         
         # ========== 更新服装 ==========
-        clothes = list(pose_data.get("clothes", {}).keys())
+        # 根据clothes_source从正确位置获取服装列表
+        if pose_data.get("clothes_source") == "pose":
+            # 结构B：服装在姿态内
+            clothes = list(pose_data.get("clothes", {}).keys())
+        elif pose_data.get("clothes_source") == "global" and psd_info.get("global_clothes"):
+            # 结构A：使用全局服装
+            clothes = list(psd_info["global_clothes"].keys())
+        else:
+            clothes = []
+        
         self.component_widget.combo_clothes.clear()
         
         has_clothes = len(clothes) > 0
@@ -328,9 +337,16 @@ class ComponentEditor(QGroupBox):
                 self.component_config["clothing"] = clothes[0]
         
         # ========== 更新动作 ==========
+        # 根据actions_source从正确位置获取动作列表
         actions = set()
-        for clothing_list in pose_data.get("clothes", {}).values():
-            actions.update(clothing_list)
+        
+        if pose_data.get("actions_source") == "pose":
+            # 结构B：动作在服装组内或姿态下
+            for clothing_list in pose_data.get("clothes", {}).values():
+                actions.update(clothing_list)
+        elif pose_data.get("actions_source") == "global" and psd_info.get("global_actions"):
+            # 结构A：使用全局动作
+            actions.update(psd_info["global_actions"])
         
         actions = sorted(list(actions))
         self.component_widget.combo_action.clear()
