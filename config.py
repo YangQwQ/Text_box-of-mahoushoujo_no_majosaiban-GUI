@@ -50,7 +50,7 @@ class ConfigLoader:
             self.platform = 'win32'
 
         # 情感匹配相关
-        self.emotion_list = ["平静", "喜悦", "喜爱", "惊讶", "困惑", "无语", "悲伤", "愤怒", "恐惧"]
+        # self.emotion_list = ["平静", "喜悦", "喜爱", "惊讶", "困惑", "无语", "悲伤", "愤怒", "恐惧"]
 
         # 状态变量(为None时为随机选择,否则为手动选择) 这两个需要移除
         self.selected_emotion = None
@@ -158,49 +158,49 @@ class ConfigLoader:
         if self.preview_style:
             self.preview_style.update(updates)
     
-    def get_emotion_filter_options(self, character_id=None):
-        """获取表情筛选选项"""
-        if character_id is None:
-            character_id = self.get_character()
+    # def get_emotion_filter_options(self, character_id=None):
+    #     """获取表情筛选选项"""
+    #     if character_id is None:
+    #         character_id = self.get_character()
         
-        # 获取角色的情感-表情映射
-        character_meta = self.mahoshojo.get(character_id, {})
+    #     # 获取角色的情感-表情映射
+    #     character_meta = self.mahoshojo.get(character_id, {})
         
-        # 情感列表
-        emotion_filters = ["全部"] + self.emotion_list
+    #     # 情感列表
+    #     emotion_filters = ["全部"] + self.emotion_list
         
-        # 存储筛选选项
-        filter_options = {
-            "全部": list(range(1, character_meta.get("emotion_count", 1) + 1))
-        }
+    #     # 存储筛选选项
+    #     filter_options = {
+    #         "全部": list(range(1, character_meta.get("emotion_count", 1) + 1))
+    #     }
         
-        # 为每种情感添加对应的表情索引
-        for emotion in self.emotion_list:
-            if emotion in character_meta:
-                # 从角色配置中获取该情感对应的表情索引列表
-                emotion_indices = character_meta[emotion]
-                if isinstance(emotion_indices, list):
-                    filter_options[emotion] = emotion_indices
-                else:
-                    filter_options[emotion] = [emotion_indices]
+    #     # 为每种情感添加对应的表情索引
+    #     for emotion in self.emotion_list:
+    #         if emotion in character_meta:
+    #             # 从角色配置中获取该情感对应的表情索引列表
+    #             emotion_indices = character_meta[emotion]
+    #             if isinstance(emotion_indices, list):
+    #                 filter_options[emotion] = emotion_indices
+    #             else:
+    #                 filter_options[emotion] = [emotion_indices]
         
-        return emotion_filters, filter_options
+    #     return emotion_filters, filter_options
 
-    def get_filtered_emotions(self, character_id=None, filter_name="全部"):
-        """获取筛选后的表情列表"""
-        if character_id is None:
-            character_id = self.get_character()
+    # def get_filtered_emotions(self, character_id=None, filter_name="全部"):
+    #     """获取筛选后的表情列表"""
+    #     if character_id is None:
+    #         character_id = self.get_character()
         
-        emotion_filters, filter_options = self.get_emotion_filter_options(character_id)
+    #     emotion_filters, filter_options = self.get_emotion_filter_options(character_id)
         
-        if filter_name == "全部":
-            # 返回所有表情
-            emotion_count = self.mahoshojo.get(character_id, {}).get("emotion_count", 1)
-            return list(range(1, emotion_count + 1))
-        elif filter_name in filter_options:
-            return filter_options[filter_name]
-        else:
-            return []
+    #     if filter_name == "全部":
+    #         # 返回所有表情
+    #         emotion_count = self.mahoshojo.get(character_id, {}).get("emotion_count", 1)
+    #         return list(range(1, emotion_count + 1))
+    #     elif filter_name in filter_options:
+    #         return filter_options[filter_name]
+    #     else:
+    #         return []
     
     def apply_style(self, style_name: str):
         """应用指定的样式配置"""
@@ -274,7 +274,7 @@ class ConfigLoader:
             font_color = first_config.get("font_color", (255, 255, 255))
             # 将RGB转换为十六进制
             self.style.bracket_color = f"#{font_color[0]:02x}{font_color[1]:02x}{font_color[2]:02x}"
-            #单独更新括号颜色
+            # 单独更新括号颜色
             update_style_config(self.style)
             return True
         return False

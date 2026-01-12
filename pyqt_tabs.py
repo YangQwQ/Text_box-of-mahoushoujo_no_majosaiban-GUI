@@ -216,9 +216,6 @@ class CharacterTabWidget(QWidget):
         self._component_config = component_config
         self._ignore_signals = False
 
-        self._psd_emotion_options = {}
-        self._psd_current_filters = []
-
         # 使用UI模板
         self.ui = Ui_CharaCfg()
         self.ui.setupUi(self)
@@ -280,13 +277,12 @@ class CharacterTabWidget(QWidget):
         ]:
             combo.blockSignals(True)
             combo.clear()
-            if items:
+            vaild_items = bool(items)
+            if vaild_items:
                 combo.addItems(items)
-                label.setVisible(True)
-                combo.setVisible(True)
-            else:
-                label.setVisible(False)
-                combo.setVisible(False)
+            label.setVisible(vaild_items)
+            combo.setVisible(vaild_items)
+
             combo.blockSignals(False)
         
         # 恢复选中值
@@ -297,6 +293,49 @@ class CharacterTabWidget(QWidget):
         if actions:
             action = config.get("action", actions[0])
             self.ui.combo_action_select.setCurrentText(action)
+    
+    def get_available_emotions(self):
+        """
+        获取当前UI中显示的所有可用表情
+        返回格式: ["表情 1", "表情 2", ...] 或 ["微笑", "开心", ...]
+        """
+        emotions = []
+        
+        # 获取当前下拉框中的所有项目（不包括"无可用表情"）
+        for i in range(self.ui.combo_emotion_select.count()):
+            text = self.ui.combo_emotion_select.itemText(i)
+            if text != "无可用表情":
+                emotions.append(text)
+        
+        return emotions
+    
+    def get_available_filters(self):
+        """
+        获取当前UI中显示的所有可用筛选器
+        返回格式: ["全部", "正面", "负面",...]
+        """
+        filters = []
+        for i in range(self.ui.combo_emotion_filter.count()):
+            text = self.ui.combo_emotion_filter.itemText(i)
+            if text != "全部":
+                filters.append(text)
+        return filters
+
+    def get_filtered_emotions(self, filter_name):
+        psd_info = CONFIGS.get_psd_info(self.current_character_id)
+        if psd_info:
+            pose = self.ui.combo_poise_select.currentText()
+            clothing = self.ui.combo_clothes_select.currentText()
+            emo_list = {}
+            if pose and pose in psd_info["poses"]:
+                filters, emo_list = get_emotion_filter_emotion_options(
+                    self.current_character_id, pose, clothing
+                )
+            filter_name = filter_name if (filter_name in filters) or filter_name in emo_list.get("全部") else "全部"
+        else:
+            emo_list = CONFIGS.mahoshojo.get(self.current_character_id, {}).get("emo", {})
+            
+        return emo_list.get(filter_name, [])
 
     def _update_emotion_filter_and_combo(self):
         """
@@ -308,99 +347,84 @@ class CharacterTabWidget(QWidget):
         
         try:
             self._ignore_signals = True
+            
+            # 获取角色配置
+            character_config = CONFIGS.mahoshojo.get(self.current_character_id, {})
             psd_info = CONFIGS.get_psd_info(self.current_character_id)
             
-            # 保存当前选中的表情，用于后续恢复
-            saved_emotion = self.ui.combo_emotion_select.currentText()
-            self.ui.combo_emotion_select.clear()
-            filter_name = self.ui.combo_emotion_filter.currentText() or  "全部"
-            self.ui.combo_emotion_filter.clear()
+            # 保存当前选中的值
+            saved_filter = self.ui.combo_emotion_filter.currentText()  or  "全部"
             
-            # 初始化变量
-            filters = []
+            # 清空控件
+            self.ui.combo_emotion_filter.clear()
+            self.ui.combo_emotion_select.clear()
+            
             emotions = []
+            filters = ["全部"]
+            show_filter = False
             
             if psd_info:
                 # PSD角色逻辑
                 pose = self.ui.combo_poise_select.currentText()
                 clothing = self.ui.combo_clothes_select.currentText()
                 
-                # 获取筛选器选项（如果姿态有表情）
                 if pose and pose in psd_info["poses"]:
-                    filters, self._psd_emotion_options = get_emotion_filter_emotion_options(
+                    filters, emo_list = get_emotion_filter_emotion_options(
                         self.current_character_id, pose, clothing
                     )
-                    
                     # 更新筛选器UI（只在有多个筛选选项时显示）
                     self.ui.combo_emotion_filter.blockSignals(True)
                     
-                    avail_filter = bool(filters and len(filters)>1)
-
-                    self.ui.label_emotion_filter.setVisible(avail_filter)
-                    self.ui.combo_emotion_filter.setVisible(avail_filter)
-                    
-                    if avail_filter:
+                    # 设置可见性
+                    show_filter = bool(filters and len(filters)>1)
+                    saved_filter = saved_filter if saved_filter in filters else "全部"
+                    if show_filter:
                         self.ui.combo_emotion_filter.addItems(filters)
-                                                
-                        # 恢复之前选中的筛选器
-                        filter_name = filter_name if filter_name in filters else filters[0]
-                        self.ui.combo_emotion_filter.setCurrentText(filter_name)
+                        self.ui.combo_emotion_filter.setCurrentText(saved_filter)
                     
                     self.ui.combo_emotion_filter.blockSignals(False)
                     
                     # 根据筛选器获取表情列表
-                    if self._psd_emotion_options and filter_name in self._psd_emotion_options:
-                        emotions = self._psd_emotion_options[filter_name]
-                    else:
-                        emotions = psd_info["poses"].get(pose, {}).get("expressions", [])
-                else:
-                    # 姿态无效，隐藏筛选器
-                    self.ui.label_emotion_filter.setVisible(False)
-                    self.ui.combo_emotion_filter.setVisible(False)
-                    emotions = []
-            
+                    if emo_list:
+                        emotions = emo_list[saved_filter]
             else:
                 # 普通角色逻辑
-                emotion_count = CONFIGS.mahoshojo.get(self.current_character_id, {}).get("emotion_count", 0)
+                emotion_count = character_config.get("emotion_count", 0)
                 
-                self.ui.combo_emotion_filter.blockSignals(True)
-                
-                avail_emos = bool(emotion_count)
-                self.ui.label_emotion_filter.setVisible(avail_emos)
-                self.ui.combo_emotion_filter.setVisible(avail_emos)
-
-                if avail_emos:
-                    emo_list = []
-                    emo_list.append("全部")
-                    for emo in CONFIGS.emotion_list:
-                        if CONFIGS.mahoshojo.get(self.current_character_id, {}).get(emo, 0):
-                            emo_list.append(emo)
-                    self.ui.combo_emotion_filter.addItems(emo_list)
+                if emotion_count > 0:
+                    # 构建筛选器（从角色配置的emo键动态获取）
+                    if "emo" in character_config:
+                        for emotion_name, emotion_indices in character_config["emo"].items():
+                            if emotion_indices:  # 如果有对应表情
+                                filters.append(emotion_name)
                     
-                    # 恢复之前选中的筛选器
-                    filter_name = filter_name if filter_name in emo_list else emo_list[0]
-                    self.ui.combo_emotion_filter.setCurrentText(filter_name)
-                
-                self.ui.combo_emotion_filter.blockSignals(False)
-                
-                # 获取筛选后的表情列表
-                if avail_emos:
-                    filtered_emotions = CONFIGS.get_filtered_emotions(self.current_character_id, filter_name)
-                    emotions = [f"表情 {i}" for i in filtered_emotions]
-            
+                    # 所有可用表情索引
+                    all_indices = list(range(1, emotion_count + 1))
+                    
+                    # 根据当前筛选器获取表情列表
+                    current_filter = saved_filter if saved_filter in filters else "全部"
+                    if current_filter == "全部":
+                        emotion_indices = all_indices
+                    else:
+                        emotion_indices = character_config["emo"].get(current_filter, [])
+                    
+                    emotions = [f"表情 {i}" for i in emotion_indices]
+                    
+                    # 显示筛选器
+                    show_filter = len(filters) > 1
+                    if show_filter:
+                        self.ui.combo_emotion_filter.addItems(filters)
+                        self.ui.combo_emotion_filter.setCurrentText(current_filter)
+
+            # 显示筛选器
+            self.ui.label_emotion_filter.setVisible(show_filter)
+            self.ui.combo_emotion_filter.setVisible(show_filter)
+                    
             # 更新表情下拉框
             self.ui.combo_emotion_select.blockSignals(True)
-            
             if emotions:
                 self.ui.combo_emotion_select.addItems(emotions)
-                
-                # 尝试恢复之前选中的表情
-                if saved_emotion and saved_emotion in emotions:
-                    index = self.ui.combo_emotion_select.findText(saved_emotion)
-                    if index >= 0:
-                        self.ui.combo_emotion_select.setCurrentIndex(index)
-                else:
-                    self.ui.combo_emotion_select.setCurrentIndex(0)
+                self.ui.combo_emotion_select.setCurrentIndex(0)
             else:
                 self.ui.combo_emotion_select.addItem("无可用表情")
             
@@ -471,70 +495,6 @@ class CharacterTabWidget(QWidget):
             self._setup_psd_ui()
         else:
             self._setup_normal_ui()
-
-    def _update_psd_subcontrols_from_pose(self, pose, saved_clothing=None, saved_action=None):
-        """根据姿态更新PSD子控件（服装、动作、表情）"""
-        info = self._psd_info()
-        if not info or pose not in info["poses"]:
-            # 隐藏所有
-            self.ui.label_clothes_select.setVisible(False)
-            self.ui.combo_clothes_select.setVisible(False)
-            self.ui.label_action_select.setVisible(False)
-            self.ui.combo_action_select.setVisible(False)
-            return
-        
-        pose_data = info["poses"][pose]
-        
-        if pose_data.get("clothes_source") == "pose":
-            clothes = list(pose_data.get("clothes", {}).keys())
-        elif pose_data.get("clothes_source") == "global" and info.get("global_clothes"):
-            clothes = list(info["global_clothes"].keys())
-        else:
-            clothes = []
-        
-        has_clothes = len(clothes) > 0
-        
-        self.ui.combo_clothes_select.clear()
-        self.ui.label_clothes_select.setVisible(has_clothes)
-        self.ui.combo_clothes_select.setVisible(has_clothes)
-        
-        if has_clothes:
-            self.ui.combo_clothes_select.addItems(clothes)
-            # 优先使用保存的值
-            if saved_clothing and saved_clothing in clothes:
-                idx = self.ui.combo_clothes_select.findText(saved_clothing)
-                if idx >= 0:
-                    self.ui.combo_clothes_select.setCurrentIndex(idx)
-        
-        # ========== 更新动作 ==========
-        # 根据actions_source从正确位置获取动作列表
-        actions = set()
-        
-        if pose_data.get("actions_source") == "pose":
-            # 结构B：动作直接在姿态下
-            for clothing_list in pose_data.get("clothes", {}).values():
-                actions.update(clothing_list)
-        elif pose_data.get("actions_source") == "global" and info.get("global_actions"):
-            # 结构A：使用全局动作
-            actions.update(info["global_actions"])
-        
-        actions = sorted(list(actions))
-        has_actions = len(actions) > 0
-        
-        self.ui.combo_action_select.clear()
-        self.ui.label_action_select.setVisible(has_actions)
-        self.ui.combo_action_select.setVisible(has_actions)
-        
-        if has_actions:
-            self.ui.combo_action_select.addItems(actions)
-            # 优先使用保存的值
-            if saved_action and saved_action in actions:
-                idx = self.ui.combo_action_select.findText(saved_action)
-                if idx >= 0:
-                    self.ui.combo_action_select.setCurrentIndex(idx)
-        
-        # ========== 更新表情 ==========
-        self._update_emotion_filter_and_combo()
                     
     def _init_character_combo(self):
         """初始化角色选择下拉框"""
@@ -547,22 +507,16 @@ class CharacterTabWidget(QWidget):
         self.ui.combo_character_select.addItems(character_names)
     
     def _connect_signals(self):
-        """连接信号 - 使用统一处理函数"""
-        # 角色切换（保持独立处理）
+        """连接信号"""
+        # 角色部分
         self.ui.combo_character_select.currentIndexChanged.connect(self._on_character_changed)
-        
-        # PSD选项统一处理（姿态、服装、动作）
         self.ui.combo_poise_select.currentIndexChanged.connect(lambda: self._on_psd_option_changed("pose"))
         self.ui.combo_clothes_select.currentIndexChanged.connect(lambda: self._on_psd_option_changed("clothing"))
         self.ui.combo_action_select.currentIndexChanged.connect(lambda: self._on_psd_option_changed("action"))
         
-        # 表情筛选使用独立函数
+        # 表情部分
         self.ui.combo_emotion_filter.currentIndexChanged.connect(self._on_emotion_filter_changed)
-        
-        # 表情选择（单独处理）
         self.ui.combo_emotion_select.currentIndexChanged.connect(self._on_emotion_selected)
-        
-        # 随机选择复选框
         self.ui.checkbox_random_emotion.toggled.connect(self._on_random_emotion_toggled)
     
     def _on_random_emotion_toggled(self, checked):
@@ -750,15 +704,11 @@ class CharacterTabWidget(QWidget):
                 "clothing": self.ui.combo_clothes_select.currentText(),
                 "action": self.ui.combo_action_select.currentText(),
                 "emotion_index": self.ui.combo_emotion_select.currentText(),
-                "emotion_filter": self.ui.combo_emotion_filter.currentText(),
-                "emotion_list": self._psd_emotion_options.get(self.ui.combo_emotion_filter.currentText(), []),
                 "overlay": "__PSD__"
             })
         else:
-            emotion_data = self.ui.combo_emotion_select.currentIndex() + 1
             values.update({
-                "emotion_index": emotion_data if emotion_data else 1,
-                "emotion_filter": self.ui.combo_emotion_filter.currentText(),
+                "emotion_index": self.ui.combo_emotion_select.currentIndex() + 1,
                 "overlay": ""
             })
         

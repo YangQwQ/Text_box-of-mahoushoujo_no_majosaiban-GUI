@@ -121,6 +121,7 @@ class HotkeyConfigThread(QThread):
 
 class SettingWindow(QDialog):
     """设置窗口"""
+    ai_test_completed = Signal(bool, str)
     
     def __init__(self, parent, core):
         super().__init__(parent)
@@ -264,51 +265,29 @@ class SettingWindow(QDialog):
         model_settings = sentiment_settings.get("model_configs", {}).get(model_name, {})
         
         # 设置参数
-        self.ui.lineEdit_apiUrl.setText(
-            model_settings.get("base_url", model_config.get("base_url", ""))
-        )
-        self.ui.lineEdit_apiKey.setText(
-            model_settings.get("api_key", model_config.get("api_key", ""))
-        )
-        self.ui.lineEdit_modelName.setText(
-            model_settings.get("model", model_config.get("model", ""))
-        )
+        self.ui.lineEdit_apiUrl.setText(model_settings.get("base_url", model_config.get("base_url", "")))
+        self.ui.lineEdit_apiKey.setText(model_settings.get("api_key", model_config.get("api_key", "")))
+        self.ui.lineEdit_modelName.setText(model_settings.get("model", model_config.get("model", "")))
     
     def _connect_signals(self):
         """连接信号槽"""
         # 剪切模式
-        self.ui.comboBox_pasteModeSelect.currentIndexChanged.connect(
-            lambda: setattr(self, 'settings_changed', True)
-        )
+        self.ui.comboBox_pasteModeSelect.currentIndexChanged.connect(lambda: setattr(self, 'settings_changed', True))
         
         # 情感匹配
         if CONFIGS.gui_settings["sentiment_matching"].get("display", False):
-            self.ui.comboBox_ModelSelect.currentIndexChanged.connect(
-                self._on_model_changed
-            )
+            self.ui.comboBox_ModelSelect.currentIndexChanged.connect(self._on_model_changed)
             self.ui.pushButton_testConn.clicked.connect(self._test_ai_connection)
-            self.ui.lineEdit_apiUrl.textChanged.connect(
-                lambda: setattr(self, 'settings_changed', True)
-            )
-            self.ui.lineEdit_apiKey.textChanged.connect(
-                lambda: setattr(self, 'settings_changed', True)
-            )
-            self.ui.lineEdit_modelName.textChanged.connect(
-                lambda: setattr(self, 'settings_changed', True)
-            )
+            self.ui.lineEdit_apiUrl.textChanged.connect(lambda: setattr(self, 'settings_changed', True))
+            self.ui.lineEdit_apiKey.textChanged.connect(lambda: setattr(self, 'settings_changed', True))
+            self.ui.lineEdit_modelName.textChanged.connect(lambda: setattr(self, 'settings_changed', True))
         
         # 图像压缩
-        self.ui.checkBox_enableImgCompression.stateChanged.connect(
-            lambda: setattr(self, 'settings_changed', True)
-        )
-        self.ui.horizontalSlider_ReductionRatio.valueChanged.connect(
-            self._on_compression_ratio_changed
-        )
+        self.ui.checkBox_enableImgCompression.stateChanged.connect(lambda: setattr(self, 'settings_changed', True))
+        self.ui.horizontalSlider_ReductionRatio.valueChanged.connect(self._on_compression_ratio_changed)
         
         # 进程白名单
-        self.ui.textEdit_processList.textChanged.connect(
-            lambda: setattr(self, 'settings_changed', True)
-        )
+        self.ui.textEdit_processList.textChanged.connect(lambda: setattr(self, 'settings_changed', True))
         
         # 快捷键修改按钮
         modify_buttons = [
@@ -329,14 +308,15 @@ class SettingWindow(QDialog):
         for i in range(1, 7):
             combo = self.character_combos.get(f"character_{i}")
             if combo:
-                combo.currentIndexChanged.connect(
-                    lambda: setattr(self, 'settings_changed', True)
-                )
+                combo.currentIndexChanged.connect(lambda: setattr(self, 'settings_changed', True))
         
         # 对话框按钮
         self.ui.buttonBox.accepted.connect(self._on_save)
         self.ui.buttonBox.rejected.connect(self.reject)
         self.ui.buttonBox.button(QDialogButtonBox.Apply).clicked.connect(self._on_apply)
+
+        # 连接AI测试信号
+        self.ai_test_completed.connect(self._on_ai_test_completed)
     
     def _on_model_changed(self, index):
         """模型选择改变"""
@@ -391,19 +371,40 @@ class SettingWindow(QDialog):
         self.ui.pushButton_testConn.setEnabled(False)
         self.ui.pushButton_testConn.setText("测试中...")
         
+        # 用于取消线程的标志
+        self._test_cancelled = False
+        
         def test_in_thread():
             success = self.core.test_ai_connection(model_name, config)
             
-            self.ui.pushButton_testConn.setEnabled(True)
-            if success:
-                self.ui.pushButton_testConn.setText("连接成功")
-                QTimer.singleShot(2000, lambda: self.ui.pushButton_testConn.setText("测试连接"))
-            else:
-                self.ui.pushButton_testConn.setText("连接失败")
-                QTimer.singleShot(2000, lambda: self.ui.pushButton_testConn.setText("测试连接"))
+            # 如果已经被取消，不再发送信号
+            if not self._test_cancelled:
+                self.ai_test_completed.emit(success, "连接成功" if success else "连接失败")
         
+        # 启动测试线程
         thread = threading.Thread(target=test_in_thread, daemon=True, name="AIConnectionTest")
         thread.start()
+        
+        # 10秒后强制取消（使用QTimer，线程安全）
+        QTimer.singleShot(10000, self._cancel_ai_test)
+
+    def _cancel_ai_test(self):
+        """取消AI测试"""
+        self._test_cancelled = True
+        if not self.ui.pushButton_testConn.isEnabled():
+            self.ui.pushButton_testConn.setEnabled(True)
+            self.ui.pushButton_testConn.setText("连接超时")
+            QTimer.singleShot(2000, lambda: self.ui.pushButton_testConn.setText("测试连接"))
+
+    def _on_ai_test_completed(self, success, message):
+        """AI测试完成后的处理（在主线程执行）"""
+        # 如果已经被取消，不再处理
+        if self._test_cancelled:
+            return
+        
+        self.ui.pushButton_testConn.setEnabled(True)
+        self.ui.pushButton_testConn.setText(message)
+        QTimer.singleShot(2000, lambda: self.ui.pushButton_testConn.setText("测试连接"))
     
     def _collect_settings(self):
         """收集所有设置"""
