@@ -61,9 +61,6 @@ class ConfigLoader:
         self.current_style = "default"
         self.style = StyleConfig()
 
-        # 预览组件
-        self.preview_style = None
-
         # 加载版本信息
         self.version_info = self._load_yaml_file("version.yml")
         # 设置版本号属性
@@ -109,11 +106,11 @@ class ConfigLoader:
 
     def _get_current_character_from_layers(self):
         """从角色图层组件获取当前角色（第一个非固定角色的图层）"""
-        if not self.preview_style or 'image_components' not in self.preview_style:
+        preview_style = self.style_configs[self.current_style]
+        if not preview_style or 'image_components' not in preview_style:
             return self.character_list[1] if len(self.character_list) > 1 else self.character_list[0]
-        
         # 查找第一个角色组件
-        for component in self.preview_style['image_components']:
+        for component in preview_style['image_components']:
             if component.get("type") == "character":
                 # 如果不使用固定角色，返回该角色的名称
                 if not component.get("use_fixed_character", False):
@@ -124,83 +121,15 @@ class ConfigLoader:
         
         # 如果没有找到角色组件，返回默认角色
         return self.character_list[1] if len(self.character_list) > 1 else self.character_list[0]
-    
-    def _init_preview_style(self):
-        """初始化预览样式"""
-        if self.current_style in self.style_configs:
-            import copy
-            self.preview_style = copy.deepcopy(self.style_configs[self.current_style])
-        else:
-            # 如果当前样式不存在，使用默认样式
-            self.preview_style = copy.deepcopy(self.style_configs.get("default", {}))
 
     def get_sorted_preview_components(self):
-        """获取排序后的预览图片组件列表（按图层顺序）"""
-        if self.preview_style and 'image_components' in self.preview_style:
-            components = self.preview_style["image_components"]
+        """获取排序后的图片组件列表（按图层顺序）"""
+        import copy
+        style = copy.deepcopy(self.style_configs[self.current_style])
+        if style and 'image_components' in style:
+            components = style["image_components"]
             return sorted(components, key=lambda x: x.get("layer", 0))
         return []
-    
-    def update_preview_component(self, layer: int, updates: Dict[str, Any]):
-        """更新指定图层的预览组件配置"""
-        if not self.preview_style or 'image_components' not in self.preview_style:
-            return False
-        
-        for component in self.preview_style['image_components']:
-            if component.get("layer") == layer:
-                component.update(updates)
-                return True
-        return False
-
-    # 添加更新预览样式的方法
-    def update_preview_style(self, updates: Dict[str, Any]):
-        """更新预览样式"""
-        if self.preview_style:
-            self.preview_style.update(updates)
-    
-    # def get_emotion_filter_options(self, character_id=None):
-    #     """获取表情筛选选项"""
-    #     if character_id is None:
-    #         character_id = self.get_character()
-        
-    #     # 获取角色的情感-表情映射
-    #     character_meta = self.mahoshojo.get(character_id, {})
-        
-    #     # 情感列表
-    #     emotion_filters = ["全部"] + self.emotion_list
-        
-    #     # 存储筛选选项
-    #     filter_options = {
-    #         "全部": list(range(1, character_meta.get("emotion_count", 1) + 1))
-    #     }
-        
-    #     # 为每种情感添加对应的表情索引
-    #     for emotion in self.emotion_list:
-    #         if emotion in character_meta:
-    #             # 从角色配置中获取该情感对应的表情索引列表
-    #             emotion_indices = character_meta[emotion]
-    #             if isinstance(emotion_indices, list):
-    #                 filter_options[emotion] = emotion_indices
-    #             else:
-    #                 filter_options[emotion] = [emotion_indices]
-        
-    #     return emotion_filters, filter_options
-
-    # def get_filtered_emotions(self, character_id=None, filter_name="全部"):
-    #     """获取筛选后的表情列表"""
-    #     if character_id is None:
-    #         character_id = self.get_character()
-        
-    #     emotion_filters, filter_options = self.get_emotion_filter_options(character_id)
-        
-    #     if filter_name == "全部":
-    #         # 返回所有表情
-    #         emotion_count = self.mahoshojo.get(character_id, {}).get("emotion_count", 1)
-    #         return list(range(1, emotion_count + 1))
-    #     elif filter_name in filter_options:
-    #         return filter_options[filter_name]
-    #     else:
-    #         return []
     
     def apply_style(self, style_name: str):
         """应用指定的样式配置"""
@@ -215,9 +144,6 @@ class ConfigLoader:
             for key, value in style_data.items():
                 if hasattr(self.style, key):
                     setattr(self.style, key, value)
-            
-            # 更新预览样式
-            self._init_preview_style()
             
             # 如果使用角色颜色作为强调色，更新强调色
             if not self.update_bracket_color_from_character():

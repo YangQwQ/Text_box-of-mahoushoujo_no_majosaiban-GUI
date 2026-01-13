@@ -8,7 +8,7 @@ from ctypes import c_char_p, c_int, POINTER, c_ubyte, c_void_p, c_float, create_
 from typing import List, Dict, Any, Tuple, Optional
 from PIL import Image
 
-class EnhancedImageLoaderDLL:
+class ImageLoaderDLL:
     """增强的图像加载DLL包装器，使用JSON传递配置"""
     
     def __init__(self, dll_path: str = None):
@@ -30,8 +30,79 @@ class EnhancedImageLoaderDLL:
             raise OSError(f"加载DLL失败: {e}")
         
         self.layer_cache = False
-        self._psd_buffers = []
+        self._define_psd_functions()
     
+    def _define_psd_functions(self):
+        """定义PSD合成函数签名"""
+        # 开始PSD合成
+        self.dll.start_psd_composition.argtypes = [
+            c_int,  # width
+            c_int   # height
+        ]
+        self.dll.start_psd_composition.restype = c_int
+        
+        # 添加PSD图层
+        self.dll.add_psd_layer.argtypes = [
+            c_void_p,  # image_data
+            c_int,     # image_width
+            c_int,     # image_height
+            c_int,     # image_pitch
+            c_int,     # x
+            c_int      # y
+        ]
+        self.dll.add_psd_layer.restype = c_int
+        
+        # 结束PSD合成并返回索引
+        self.dll.finish_psd_composition.argtypes = []
+        self.dll.finish_psd_composition.restype = c_int
+        
+        # 清理PSD缓存
+        self.dll.clear_psd_cache.argtypes = []
+        self.dll.clear_psd_cache.restype = None
+    
+    # 添加PSD合成相关方法
+    def start_psd_composition(self, width: int, height: int) -> bool:
+        """开始PSD合成，创建临时画布"""
+        result = self.dll.start_psd_composition(width, height)
+        return result == 1
+    
+    def add_psd_layer(self, image: Image.Image, x: int, y: int) -> bool:
+        """添加PSD图层到临时画布"""
+        # 确保是RGBA格式
+        if image.mode != "RGBA":
+            image = image.convert("RGBA")
+        
+        # 获取图像数据
+        rgba_bytes = image.tobytes()
+        width, height = image.size
+        pitch = width * 4
+        
+        # 调用DLL函数
+        result = self.dll.add_psd_layer(
+            # cast(buffer, c_void_p),
+            rgba_bytes,
+            width,
+            height,
+            pitch,
+            x,
+            y
+        )
+        
+        return result == 1
+    
+    def finish_psd_composition(self) -> int:
+        """结束PSD合成，返回缓存索引"""
+        # 清理图层缓冲区
+        
+        index = self.dll.finish_psd_composition()
+        print(f"PSD合成完成，索引: {index}")
+        return index
+    
+    def clear_psd_cache(self):
+        """清理PSD缓存"""
+        self.dll.clear_psd_cache()
+        print("PSD缓存已清理")
+
     def _define_function_signatures(self):
         """定义DLL函数签名"""
         # 清理缓存
@@ -43,10 +114,6 @@ class EnhancedImageLoaderDLL:
             c_int,                      # canvas_width
             c_int,                      # canvas_height
             c_char_p,                   # components_json
-            c_void_p,                   # image_data (RGBA数据指针)
-            c_int,                      # image_width
-            c_int,                      # image_height
-            c_int,                      # image_pitch
             POINTER(POINTER(c_ubyte)),  # out_data
             POINTER(c_int),             # out_width
             POINTER(c_int)              # out_height
@@ -112,46 +179,10 @@ class EnhancedImageLoaderDLL:
         components: List[Dict[str, Any]],
     ) -> Optional[Image.Image]:
         """生成完整的图像，使用JSON传递组件配置"""
-        # 1. 准备外部图像数据（用于character组件的PSD图像）
-        external_image_data = None
-        external_image_width = 0
-        external_image_height = 0
-        external_image_pitch = 0
-        
-        # 2. 确保缓冲区列表存在
-        if not hasattr(self, '_psd_buffers'):
-            self._psd_buffers = []
-        
-        # 清空之前的缓冲区
-        self._psd_buffers.clear()
-        
-        # 查找character组件中的PSD图像
-        for comp in components:
-            if comp.get("type") == "character" and comp.get("overlay") == "__PSD__":
-                img = comp.pop("__psd_image__", None)  # PIL.Image
-                if img:
-                    # 转换为RGBA格式
-                    img_rgba = img.convert("RGBA")
-                    width, height = img_rgba.size
-                    pitch = width * 4
-                    rgba_bytes = img_rgba.tobytes()
-                    
-                    # 创建缓冲区并保存引用
-                    buffer = create_string_buffer(rgba_bytes)
-                    self._psd_buffers.append(buffer)
-                    
-                    # 设置外部图像数据参数
-                    external_image_data = cast(buffer, c_void_p)
-                    external_image_width = width
-                    external_image_height = height
-                    external_image_pitch = pitch
-                    
-                    break
-        
-        # 3. 序列化 JSON
+        # 1. 序列化 JSON
         components_json = json.dumps(components, ensure_ascii=False).encode('utf-8')
         
-        # 4. 调用 DLL
+        # 2. 调用 DLL
         out_data = POINTER(c_ubyte)()
         out_w, out_h = c_int(), c_int()
         
@@ -159,10 +190,6 @@ class EnhancedImageLoaderDLL:
             canvas_width,
             canvas_height,
             components_json,
-            external_image_data if external_image_data else c_void_p(None),
-            external_image_width,
-            external_image_height,
-            external_image_pitch,
             ctypes.byref(out_data),
             ctypes.byref(out_w),
             ctypes.byref(out_h)
@@ -372,11 +399,11 @@ def draw_content_auto(
 # 全局实例
 _enhanced_loader = None
 
-def get_enhanced_loader() -> EnhancedImageLoaderDLL:
+def get_enhanced_loader() -> ImageLoaderDLL:
     """获取增强的图像加载器"""
     global _enhanced_loader
     if _enhanced_loader is None:
-        _enhanced_loader = EnhancedImageLoaderDLL()
+        _enhanced_loader = ImageLoaderDLL()
     return _enhanced_loader
 
 def generate_image_with_dll(

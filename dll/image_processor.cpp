@@ -12,7 +12,7 @@
 #include <vector>
 
 // 计时用
-//#define _DEBUG
+// #define _DEBUG
 #ifdef _DEBUG
 #include <chrono>
 #define DEBUG_PRINT(fmt, ...) printf("[DEBUG] " fmt "\n", ##__VA_ARGS__)
@@ -52,52 +52,6 @@ namespace image_loader {
 
 // Return codes
 enum class LoadResult { SUCCESS = 1, FAILED = 0, FILE_NOT_FOUND = -1, SDL_INIT_FAILED = -2, IMAGE_INIT_FAILED = -3, TTF_INIT_FAILED = -4, UNSUPPORTED_FORMAT = -5, JSON_PARSE_ERROR = -6, TEXT_CONFIG_ERROR = -7 };
-
-// Fill modes
-enum class FillMode { FIT = 0, WIDTH = 1, HEIGHT = 2 };
-enum class AlignMode { LEFT = 0, CENTER = 1, RIGHT = 2 };
-enum class VAlignMode { TOP = 0, MIDDLE = 1, BOTTOM = 2 };
-
-// Simple ImageData structure (compatible with original C structure)
-struct ImageData {
-  unsigned char *data = nullptr;
-  int width = 0;
-  int height = 0;
-  int pitch = 0;
-
-  ImageData() = default;
-
-  ~ImageData() {
-    if (data) {
-      free(data);
-      data = nullptr;
-    }
-  }
-
-  // Create from SDL surface
-  static std::unique_ptr<ImageData> FromSurface(SDL_Surface *surface) {
-    if (!surface)
-      return nullptr;
-
-    auto image_data = std::make_unique<ImageData>();
-    image_data->width = surface->w;
-    image_data->height = surface->h;
-    image_data->pitch = surface->pitch;
-
-    size_t data_size = static_cast<size_t>(surface->h) * surface->pitch;
-    image_data->data = static_cast<unsigned char *>(malloc(data_size));
-    if (image_data->data && surface->pixels) {
-      memcpy(image_data->data, surface->pixels, data_size);
-    }
-
-    return image_data;
-  }
-
-private:
-  // Disable copy
-  ImageData(const ImageData &) = delete;
-  ImageData &operator=(const ImageData &) = delete;
-};
 
 // Font cache entry
 struct FontCacheEntry {
@@ -730,18 +684,11 @@ public:
     }
   }
 
-  LoadResult GeneratePreviewImage(int canvas_width, int canvas_height, const char *components_json, unsigned char *image_data, int image_width, int image_height, int image_pitch, unsigned char **out_data, int *out_width, int *out_height) {
+  LoadResult GeneratePreviewImage(int canvas_width, int canvas_height, const char *components_json, unsigned char **out_data, int *out_width, int *out_height) {
     TIME_SCOPE("Starting to generate preview image");
 
     if (!InitSDL()) {
       return LoadResult::SDL_INIT_FAILED;
-    }
-
-    // 如果有传入图像数据，使用它
-    SDL_Surface *external_image_surface = nullptr;
-    if (image_data && image_width > 0 && image_height > 0) {
-      external_image_surface = SDL_CreateRGBSurfaceWithFormatFrom(image_data, image_width, image_height, 32, image_pitch, SDL_PIXELFORMAT_ABGR8888);
-      DEBUG_PRINT("External image loaded: %dx%d", image_width, image_height);
     }
 
     // Parse JSON
@@ -749,8 +696,6 @@ public:
     if (!json_root || !cJSON_IsArray(json_root)) {
       DEBUG_PRINT("JSON parse error");
       cJSON_Delete(json_root);
-      if (external_image_surface)
-        SDL_FreeSurface(external_image_surface);
       return LoadResult::JSON_PARSE_ERROR;
     }
 
@@ -759,13 +704,8 @@ public:
     if (!canvas) {
       DEBUG_PRINT("Failed to create canvas: %s", SDL_GetError());
       cJSON_Delete(json_root);
-      if (external_image_surface)
-        SDL_FreeSurface(external_image_surface);
       return LoadResult::FAILED;
     }
-
-    // Fill with transparent
-    SDL_FillRect(canvas, nullptr, SDL_MapRGBA(canvas->format, 0, 0, 0, 0));
 
     // Check for cache mark
     bool has_cache_mark = static_layer_cache_first_ != nullptr;
@@ -808,16 +748,12 @@ public:
       // 需要缓存图层
       if (!has_cache_mark) {
         // Determine if component is static
-        bool is_static = false;
-        if (type != "character" && type != "background")
-          is_static = true;
+        bool is_static = (type != "character" && type != "background");
 
         if (is_static) {
-          // If it's a static component and no current static segment, create one
           if (!current_static_segment)
             current_static_segment = SDL_CreateRGBSurfaceWithFormat(0, canvas_width, canvas_height, 32, SDL_PIXELFORMAT_ABGR8888);
         } else {
-          // Encounter dynamic component, save current static segment
           AddStaticLayerToCache(current_static_segment);
           current_static_segment = nullptr;
           DEBUG_PRINT("Saving static layer segment");
@@ -830,7 +766,7 @@ public:
         draw_success = DrawBackgroundComponent(canvas, comp_obj);
       } else if (type == "character") {
         // 修改：传递外部图像数据给角色绘制函数
-        draw_success = DrawCharacterComponent(canvas, comp_obj, external_image_surface);
+        draw_success = DrawCharacterComponent(canvas, comp_obj);
       } else if (type == "namebox") {
         draw_success = DrawNameboxComponent(canvas, current_static_segment, comp_obj);
       } else if (type == "text") {
@@ -843,7 +779,6 @@ public:
         DEBUG_PRINT("Failed to draw component: %s", type.c_str());
       }
     }
-
     // Handle last static segment (only when no cache mark)
     if (!has_cache_mark && current_static_segment) {
       AddStaticLayerToCache(current_static_segment);
@@ -852,16 +787,10 @@ public:
 
     cJSON_Delete(json_root);
 
-    // 清理外部图像表面
-    if (external_image_surface) {
-      SDL_FreeSurface(external_image_surface);
+    if (preview_cache_){
+      SDL_FreeSurface(preview_cache_);
     }
-
-    // Cache the generated image as preview (replace old preview)
-    ClearPreviewCache();
-    preview_cache_ = ImageData::FromSurface(canvas);
-
-    DEBUG_PRINT("Preview cache updated: %dx%d", preview_cache_->width, preview_cache_->height);
+    preview_cache_ = canvas;
 
     // Return image data
     *out_width = canvas->w;
@@ -869,13 +798,14 @@ public:
     size_t data_size = static_cast<size_t>(canvas->h) * canvas->pitch;
     *out_data = static_cast<unsigned char *>(malloc(data_size));
 
+    // 清空PSD合成图的缓存
+    ClearPSDCache();
+
     if (*out_data) {
       memcpy(*out_data, canvas->pixels, data_size);
-      SDL_FreeSurface(canvas);
       DEBUG_PRINT("Image generation successful: %dx%d", *out_width, *out_height);
       return LoadResult::SUCCESS;
     } else {
-      SDL_FreeSurface(canvas);
       DEBUG_PRINT("Failed to allocate output buffer");
       return LoadResult::FAILED;
     }
@@ -896,19 +826,14 @@ public:
     }
 
     // 检查预览缓存
-    SDL_LockMutex(cache_mutex_);
-    bool has_preview = (preview_cache_ != nullptr);
-    SDL_UnlockMutex(cache_mutex_);
-
-    if (!has_preview) {
+    if (!preview_cache_) {
       DEBUG_PRINT("No preview in cache, cannot draw content");
       return LoadResult::FAILED;
     }
 
     // 2. 获取画布
-    SDL_LockMutex(cache_mutex_);
-    SDL_Surface *canvas = SDL_CreateRGBSurfaceWithFormatFrom(preview_cache_->data, preview_cache_->width, preview_cache_->height, 32, preview_cache_->pitch, SDL_PIXELFORMAT_ABGR8888);
-    SDL_UnlockMutex(cache_mutex_);
+    SDL_Surface *canvas = preview_cache_;
+    preview_cache_ = nullptr;
 
     if (!canvas) {
       DEBUG_PRINT("Failed to create canvas: %s", SDL_GetError());
@@ -1030,10 +955,20 @@ public:
 
     DEBUG_PRINT("All resources cleaned up");
   }
+  // PSD合成相关函数
+  bool CreatePSDTempCanvas(int width, int height);
+  bool AddPSDLayerToTempCanvas(unsigned char *image_data, int image_width, int image_height, int image_pitch, int x, int y);
+  int FinalizePSDComposition();
+  void ClearPSDCache();
 
 private:
   ImageLoaderManager() = default;
   StyleConfig style_config_;
+  // PSD缓存相关
+  std::unordered_map<int, SDL_Surface *> psd_image_cache_;
+  SDL_Surface *psd_temp_canvas_ = nullptr;
+  int next_psd_index_ = 0;
+
 
   // 新增：使用emoji位置信息的文本绘制函数
   void DrawTextAndEmojiToCanvas(SDL_Surface *canvas, const std::string &text, const std::vector<std::string> &emoji_list, const std::vector<std::pair<int, int>> &emoji_positions, int text_x, int text_y, int text_width, int text_height);
@@ -1547,35 +1482,36 @@ private:
   }
 
   // 角色组件绘制
-  bool DrawCharacterComponent(SDL_Surface *target1, cJSON *comp_obj, SDL_Surface *external_image_surface = nullptr) {
+  bool DrawCharacterComponent(SDL_Surface *target1, cJSON *comp_obj) {
     SDL_Surface *char_surface = nullptr;
+    bool using_psd_cache = false;
+    // 检查是否有PSD缓存索引
+    cJSON *psd_index_item = cJSON_GetObjectItem(comp_obj, "psd_index");
+    if (psd_index_item && cJSON_IsNumber(psd_index_item)) {
+      int psd_index = psd_index_item->valueint;
 
-    // 优先使用外部传入的图像数据
-    if (external_image_surface) {
-      char_surface = external_image_surface;
-      DEBUG_PRINT("Using external image surface: %dx%d", char_surface->w, char_surface->h);
-    }
-    // 其次检查是否有PSD模式的数据
-    else {
-      uint8_t *rgba = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(GetJsonNumber(comp_obj, "image_data_ptr", 0)));
-      if (rgba) {
-        int width = static_cast<int>(GetJsonNumber(comp_obj, "image_width", 0));
-        int height = static_cast<int>(GetJsonNumber(comp_obj, "image_height", 0));
-        DEBUG_PRINT("draw character from psd WH: %d %d", width, height);
-        char_surface = SDL_CreateRGBSurfaceWithFormatFrom((void *)rgba, width, height, 32, width * 4, SDL_PIXELFORMAT_ABGR8888);
-      } else {
-        const char *draw_char_name = "hiro";
-        int draw_emotion = 1;
-
-        draw_char_name = GetJsonString(comp_obj, "character_name", "");
-        draw_emotion = static_cast<int>(GetJsonNumber(comp_obj, "emotion_index", 1));
-
-        if (!draw_char_name || strlen(draw_char_name) == 0 || draw_emotion <= 0) {
-          return false;
+      auto it = psd_image_cache_.find(psd_index);
+      if (it != psd_image_cache_.end() && it->second) {
+        // 从缓存创建表面
+        char_surface = it->second;
+        if (char_surface) {
+          using_psd_cache = true;
+          DEBUG_PRINT("Using PSD cached image (index: %d): %dx%d", psd_index, char_surface->w, char_surface->h);
         }
-
-        char_surface = LoadCharacterImage(draw_char_name, draw_emotion);
       }
+    }
+    else {
+      const char *draw_char_name = "hiro";
+      int draw_emotion = 1;
+
+      draw_char_name = GetJsonString(comp_obj, "character_name", "");
+      draw_emotion = static_cast<int>(GetJsonNumber(comp_obj, "emotion_index", 1));
+
+      if (!draw_char_name || strlen(draw_char_name) == 0 || draw_emotion <= 0) {
+        return false;
+      }
+
+      char_surface = LoadCharacterImage(draw_char_name, draw_emotion);
     }
 
     if (!char_surface) {
@@ -1596,10 +1532,7 @@ private:
 
       SDL_Surface *scaled_surface = ScaleSurfaceWithRenderer(char_surface, new_width, new_height);
       if (scaled_surface) {
-        // 注意：如果char_surface是外部传入的，不应该释放它
-        if (!external_image_surface) {
-          SDL_FreeSurface(char_surface);
-        }
+        SDL_FreeSurface(char_surface);
         final_surface = scaled_surface;
       }
     }
@@ -1619,7 +1552,7 @@ private:
       SDL_BlitSurface(final_surface, nullptr, target1, &pos);
 
     // 注意：只释放我们创建的表面，不释放外部传入的表面
-    if (!external_image_surface && final_surface != char_surface) {
+    if (final_surface != char_surface) {
       SDL_FreeSurface(final_surface);
     }
 
@@ -2063,11 +1996,11 @@ private:
   }
 
   // Cache management functions
-  void ClearPreviewCache() {
-    SDL_LockMutex(cache_mutex_);
-    preview_cache_.reset();
-    SDL_UnlockMutex(cache_mutex_);
-  }
+  // void ClearPreviewCache() {
+  //   SDL_LockMutex(cache_mutex_);
+  //   preview_cache_.reset();
+  //   SDL_UnlockMutex(cache_mutex_);
+  // }
 
   void ClearStaticLayerCache() {
     SDL_LockMutex(cache_mutex_);
@@ -2180,9 +2113,8 @@ private:
   bool compression_enabled_ = false;
   int compression_ratio_ = 40; // 默认40%
 
-  // Caches (only fonts, static layers, and preview)
   FontCacheEntry *font_cache_ = nullptr;
-  std::unique_ptr<ImageData> preview_cache_;
+  SDL_Surface *preview_cache_ = nullptr;
 
   StaticLayerNode *static_layer_cache_first_ = nullptr;
   StaticLayerNode *static_layer_cache_current_ = nullptr;
@@ -2710,6 +2642,80 @@ void ImageLoaderManager::DrawTextAndEmojiToCanvas(SDL_Surface *canvas, const std
   DEBUG_PRINT("Text drawing completed");
 }
 
+bool ImageLoaderManager::CreatePSDTempCanvas(int width, int height) {
+  if (psd_temp_canvas_) {
+    SDL_FreeSurface(psd_temp_canvas_);
+    psd_temp_canvas_ = nullptr;
+  }
+
+  psd_temp_canvas_ = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_ABGR8888);
+  if (!psd_temp_canvas_) {
+    DEBUG_PRINT("Failed to create PSD temp canvas: %s", SDL_GetError());
+    return false;
+  }
+
+  // 初始化为透明
+  // SDL_FillRect(psd_temp_canvas_, nullptr, SDL_MapRGBA(psd_temp_canvas_->format, 0, 0, 0, 0));
+
+  return true;
+}
+
+bool ImageLoaderManager::AddPSDLayerToTempCanvas(unsigned char *image_data, int image_width, int image_height, int image_pitch, int x, int y) {
+
+  if (!psd_temp_canvas_) {
+    DEBUG_PRINT("No PSD temp canvas created");
+    return false;
+  }
+
+  if (!image_data || image_width <= 0 || image_height <= 0) {
+    DEBUG_PRINT("Invalid layer data");
+    return false;
+  }
+
+  // 创建图层表面
+  SDL_Surface *layer_surface = SDL_CreateRGBSurfaceWithFormatFrom(image_data, image_width, image_height, 32, image_pitch, SDL_PIXELFORMAT_ABGR8888);
+
+  if (!layer_surface) {
+    DEBUG_PRINT("Failed to create layer surface: %s", SDL_GetError());
+    return false;
+  }
+
+  // 绘制到临时画布
+  SDL_Rect dest_rect = {x, y, image_width, image_height};
+  SDL_BlitSurface(layer_surface, nullptr, psd_temp_canvas_, &dest_rect);
+
+  SDL_FreeSurface(layer_surface);
+  return true;
+}
+
+int ImageLoaderManager::FinalizePSDComposition() {
+  if (!psd_temp_canvas_) {
+    DEBUG_PRINT("No PSD temp canvas to finalize");
+    return -1;
+  }
+
+  int index = next_psd_index_++;
+  psd_image_cache_[index] = psd_temp_canvas_;
+  psd_temp_canvas_ = nullptr;
+
+  DEBUG_PRINT("PSD composition finalized, index: %d, size: %dx%d", index, psd_temp_canvas_->w, psd_temp_canvas_->h);
+
+  return index;
+}
+
+void ImageLoaderManager::ClearPSDCache() {
+
+  psd_image_cache_.clear();
+  next_psd_index_ = 0;
+
+  if (psd_temp_canvas_) {
+    SDL_FreeSurface(psd_temp_canvas_);
+    psd_temp_canvas_ = nullptr;
+  }
+
+  DEBUG_PRINT("PSD cache cleared");
+}
+
 } // namespace image_loader
 
 // C interface export functions
@@ -2723,9 +2729,7 @@ __declspec(dllexport) void update_style_config(const char *style_json) { image_l
 
 __declspec(dllexport) void clear_cache(const char *cache_type) { image_loader::ImageLoaderManager::GetInstance().ClearCache(cache_type); }
 
-__declspec(dllexport) int generate_image(int w, int h, const char *json, unsigned char *image_data, int image_width, int image_height, int image_pitch, unsigned char **out, int *outW, int *outH) {
-  return static_cast<int>(image_loader::ImageLoaderManager::GetInstance().GeneratePreviewImage(w, h, json, image_data, image_width, image_height, image_pitch, out, outW, outH));
-}
+__declspec(dllexport) int generate_image(int w, int h, const char *json, unsigned char **out, int *outW, int *outH) { return static_cast<int>(image_loader::ImageLoaderManager::GetInstance().GeneratePreviewImage(w, h, json, out, outW, outH)); }
 
 __declspec(dllexport) int draw_content_simple(const char *text, const char *emoji_json, unsigned char *image_data, int image_width, int image_height, int image_pitch, unsigned char **out_data, int *out_width, int *out_height) {
   return static_cast<int>(image_loader::ImageLoaderManager::GetInstance().DrawContentWithTextAndImage(text, emoji_json, image_data, image_width, image_height, image_pitch, out_data, out_width, out_height));
@@ -2736,6 +2740,20 @@ __declspec(dllexport) void free_image_data(unsigned char *data) {
     free(data);
   }
 }
+
+__declspec(dllexport) int start_psd_composition(int width, int height) {
+  bool success = image_loader::ImageLoaderManager::GetInstance().CreatePSDTempCanvas(width, height);
+  return success ? 1 : 0;
+}
+
+__declspec(dllexport) int add_psd_layer(unsigned char *image_data, int image_width, int image_height, int image_pitch, int x, int y) {
+  bool success = image_loader::ImageLoaderManager::GetInstance().AddPSDLayerToTempCanvas(image_data, image_width, image_height, image_pitch, x, y);
+  return success ? 1 : 0;
+}
+
+__declspec(dllexport) int finish_psd_composition() { return image_loader::ImageLoaderManager::GetInstance().FinalizePSDComposition(); }
+
+__declspec(dllexport) void clear_psd_cache() { image_loader::ImageLoaderManager::GetInstance().ClearPSDCache(); }
 
 __declspec(dllexport) void cleanup_all() { image_loader::ImageLoaderManager::GetInstance().Cleanup(); }
 

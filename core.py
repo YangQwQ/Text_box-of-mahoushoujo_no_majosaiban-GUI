@@ -55,7 +55,8 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
         self.sentiment_enabled = False  # 功能是否启用
         self.sentiment_available = False  # 分析器是否可用
         self.current_model = CONFIGS.gui_settings.get("sentiment_matching",{}).get("ai_model", "")  # 当前模型名称
-        
+        self.force_use = {} # 强制使用表情（情感分析后使用）
+
         # 初始化DLL加载器
         set_dll_global_config(CONFIGS.ASSETS_PATH, min_image_ratio=0.2)
         update_dll_gui_settings(CONFIGS.gui_settings)
@@ -80,8 +81,9 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
             # 功能未启用，直接返回
             self._notify_gui(False, True, "")
             return
-
-        self.toggle_sentiment_matching(enabled)
+        
+        # 初始化情感分析器
+        self._notify_gui(True, False, "")
 
     def toggle_sentiment_matching(self, enabled):
         """切换情感匹配状态"""
@@ -181,13 +183,15 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
                     selected_emotion = self.sentiment_analyzer.analyze_sentiment_with_options(text, filters)
                     
                     if selected_emotion:
+                        emo = ""
                         character_name = component.get("character_name", "")
                         if not available_filters:
-                            component["emotion_index"] = selected_emotion
+                            emo = selected_emotion
                         else:
                             emo_list = char_widget.get_filtered_emotions(selected_emotion)
-                            component["emotion_index"] = random.choice(emo_list)
-                        component["force_use"] = True
+                            if emo_list:
+                                emo = random.choice(emo_list)
+                        self.force_use[layer_index] = emo
                         updated = True
                         
                         # 显示更新信息
@@ -196,8 +200,6 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
                         self.base_msg += info
                         print(info)
             
-            if updated:
-                clear_cache()
             return updated
                 
         except Exception as e:
@@ -245,11 +247,22 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
             # Linux 支持
             return True
 
-    def compose_psd_chara(self, chara, pose, cloth, action, expr):
+    def compose_psd_chara(self, chara, pose, cloth, action, expr) -> int:
+        """
+        合成PSD角色图片并返回缓存索引
+        """
+        st = time.time()
         import os 
         from utils.psd_utils import compose_image
         psd_path = os.path.join(CONFIGS.ASSETS_PATH, "chara", chara, f"{chara}.psd")
-        return compose_image(psd_path, pose, cloth, action, expr)
+        
+        try:
+            psd_index = compose_image(psd_path, pose, cloth, action, expr)
+            print(f"PSD图片合成用时: {int((time.time() - st)*1000)}")
+            return psd_index
+        except Exception as e:
+            print(f"PSD合成失败: {str(e)}")
+            return -1
 
     def generate_preview(self) -> tuple:
         """生成预览图片和相关信息"""
@@ -319,13 +332,15 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
                     use_fixed = ui_values.get("use_fixed_character", False)
                     
                     # 检查是否强制使用
-                    force_use = component.get("force_use", False)
+                    force_use = layer_index in self.force_use.keys()
                     if force_use:
-                        component.pop("force_use", None)
-                        emotion_index = component.get("emotion_index")
+                        emotion_index = self.force_use[layer_index]
+                        # component.get("emotion_index")
+                        self.force_use.pop(layer_index)
                     elif not use_fixed:
                         emo_list = character_tab_widgets[layer_index].get_available_emotions()
-                        random_selected_emotion = random.choice(emo_list)
+                        random_selected_emotion = random.choice(emo_list) if emo_list else ""
+
                         if psd_info:
                             # PSD角色：直接使用表情名称字符串
                             emotion_index = random_selected_emotion
@@ -338,15 +353,15 @@ class ManosabaCore(QObject):  # 继承 QObject 以支持信号
                         pose = ui_values.get("pose", "")
                         clothing = ui_values.get("clothing")
                         action = ui_values.get("action")
-                        psd_key = (character_name, pose, clothing, action, emotion_index)
-                        if psd_key not in CONFIGS.psd_surface_cache:
-                            st = time.time()
-                            CONFIGS.psd_surface_cache[psd_key] = self.compose_psd_chara(*psd_key)
-                            print(f"PSD 组件绘制耗时: {int((time.time()-st)*1000)}ms")
-                        component["__psd_image__"] = CONFIGS.psd_surface_cache[psd_key]
-                        component["overlay"] = "__PSD__"
-
-                        print(f"PSD 组件: {character_name}, 姿势: {pose}, 服装: {clothing}, 动作: {action}, 表情: {emotion_index}\n")
+                        
+                        # 直接合成PSD并获取索引
+                        psd_index = self.compose_psd_chara(character_name, pose, clothing, action, emotion_index)
+                        
+                        # 将索引存入组件，而不是图片数据
+                        component["psd_index"] = psd_index
+                        component["overlay"] = ""  # 清空overlay，使用psd_index
+                        
+                        print(f"PSD 组件: {character_name}, 姿势: {pose}, 服装: {clothing}, 动作: {action}, 表情: {emotion_index}, 索引: {psd_index}")
                         
                     component["emotion_index"] = emotion_index
                         

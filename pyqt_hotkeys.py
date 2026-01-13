@@ -159,8 +159,6 @@ class HotkeyManager(QObject):
         new_index = (current_emotion_index + direction) % max_index
 
         tab.ui.checkbox_random_emotion.setChecked(False)
-        updates = {"emotion_index": new_index,"use_fixed_character": True}
-        CONFIGS.update_preview_component(tab.layer_index, updates)
 
         tab.ui.combo_emotion_select.setCurrentIndex(new_index)
         self.gui.update_status(f"表情已切换到: 表情 {new_index+1}")

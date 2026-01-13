@@ -31,16 +31,6 @@ class BackgroundTabWidget(QWidget):
         # 加载背景图片列表并初始化UI
         self._init_from_config()
     
-    def get_component_config(self):
-        """获取当前图层的组件配置"""
-        if not CONFIGS.preview_style or 'image_components' not in CONFIGS.preview_style:
-            return self._component_config  # 返回传入的配置
-        
-        for component in CONFIGS.preview_style['image_components']:
-            if component.get("layer") == self.layer_index:
-                return component
-        return self._component_config  # 返回传入的配置
-    
     def _load_background_files(self, overlay = ""):
         """加载背景图片文件列表 - 使用 CONFIGS.background_list"""
         self.comboBox_bgSelect.clear()
@@ -228,8 +218,8 @@ class CharacterTabWidget(QWidget):
         
     def _setup_psd_ui(self):
         """设置PSD角色UI"""
-        config = self._get_component_config()
-        
+        config = self._component_config
+
         # 姿态
         poses = get_pose_options(self.current_character_id)
         self.ui.combo_poise_select.clear()
@@ -264,7 +254,7 @@ class CharacterTabWidget(QWidget):
         if not self.current_character_id:
             return
         
-        config = self._get_component_config()
+        config = self._component_config
         pose = self.ui.combo_poise_select.currentText()
         
         # 获取服装和动作
@@ -436,30 +426,13 @@ class CharacterTabWidget(QWidget):
             
         finally:
             self._ignore_signals = False
-        
-    def _get_component_config(self):
-        """获取当前图层的组件配置"""
-        # 优先使用传入的配置
-        if self._component_config:
-            return self._component_config
-        
-        # 如果没有传入配置，从预览样式中获取
-        if not CONFIGS.preview_style or 'image_components' not in CONFIGS.preview_style:
-            return None
-        
-        for component in CONFIGS.preview_style['image_components']:
-            if component.get("layer") == self.layer_index:
-                self._component_config = component  # 缓存配置
-                return component
-        
-        return None
     
     def _init_from_config(self):
         """从配置初始化UI"""
         try:
             self._ignore_signals = True
             
-            config = self._get_component_config()
+            config = self._component_config
             if not config:
                 return
             
@@ -723,9 +696,11 @@ class CharacterTabWidget(QWidget):
         if "(" in selected_text and ")" in selected_text:
             char_id = selected_text.split("(")[-1].rstrip(")")
             self.current_character_id = char_id
-            
-            # 更新配置文件中的角色名称
-            CONFIGS.update_preview_component(self.layer_index, {"character_name": char_id})
+
+            # 更新角色名 （更新括号颜色需要这个）        
+            for component in CONFIGS.style_configs[CONFIGS.current_style]['image_components']:
+                if component.get("layer") == self.layer_index:
+                    component["character_name"] = char_id
             
             self._ignore_signals = True
             self._reload_ui()

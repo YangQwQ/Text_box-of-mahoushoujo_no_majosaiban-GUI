@@ -347,7 +347,7 @@ def compose_image(path: str, pose: str,
     只合成指定的图层 + 在选项层级中发现的BASE/FORE图层
     """
     psd = _load_psd(path)
-    psd_info = inspect_psd(path)
+    # psd_info = inspect_psd(path)
     
     pose_root = _find_group(psd, "姿态")
     if not pose_root:
@@ -367,31 +367,12 @@ def compose_image(path: str, pose: str,
     def collect_layers(group, is_fore=False):
         """深度优先遍历，只进入选中的选项组，同时收集BASE/FORE"""
         nonlocal found_pose, found_clothing, found_action, found_expression
-        
         for layer in group:
             layer_name = _clean(layer.name)
             
             if layer.is_group():
-                # 处理BASE和FORE组
-                if layer_name.startswith("BASE"):
-                    # BASE组内的内容加入基础栈
-                    for child in layer.descendants():
-                        if not child.is_group():
-                            base_stack.append((child, False))
-                    # 继续递归BASE组内的组（理论上不应该有，但以防万一）
-                    collect_layers(layer, False)
-                    continue
-                elif layer_name.startswith("FORE"):
-                    # FORE组内的内容加入顶层栈
-                    for child in layer.descendants():
-                        if not child.is_group():
-                            fore_stack.append((child, False))
-                    # 继续递归FORE组内的组
-                    collect_layers(layer, True)
-                    continue
-                
                 # 处理选项组
-                if layer_name.startswith("姿态") and not found_pose:
+                if not found_pose and layer_name.startswith("姿态"):
                     # 进入选中的姿态
                     target_pose = next((p for p in layer if _clean(p.name) == pose), None)
                     if target_pose and target_pose.is_group():
@@ -399,12 +380,12 @@ def compose_image(path: str, pose: str,
                         # 收集姿态下的直接图层（不属于任何选项组）
                         for child in target_pose:
                             if not child.is_group():
-                                base_stack.append((child, False))
+                                base_stack.append(child)
                         # 在姿态组内继续查找其他选项和BASE/FORE
                         collect_layers(target_pose, is_fore)
                     continue
                 
-                elif layer_name.startswith("服装") and not found_clothing and clothing:
+                elif clothing and not found_clothing and layer_name.startswith("服装"):
                     # 进入选中的服装
                     target_cloth = next((c for c in layer if _clean(c.name) == clothing), None)
                     if target_cloth:
@@ -413,15 +394,15 @@ def compose_image(path: str, pose: str,
                             # 收集服装下的所有图层（但不包括选项组）
                             for child in target_cloth:
                                 if not child.is_group():
-                                    base_stack.append((child, False))
+                                    base_stack.append(child)
                                 elif child.name.startswith(("BASE", "FORE")):
                                     # 在服装组内继续查找BASE/FORE
                                     collect_layers(child, is_fore)
                         else:
-                            base_stack.append((target_cloth, False))
+                            base_stack.append(target_cloth)
                     continue
                 
-                elif layer_name.startswith("动作") and not found_action and action:
+                elif action and  not found_action and layer_name.startswith("动作"):
                     # 进入选中的动作
                     target_action = next((a for a in layer if _clean(a.name) == action), None)
                     if target_action:
@@ -429,14 +410,14 @@ def compose_image(path: str, pose: str,
                         if target_action.is_group():
                             for child in target_action:
                                 if not child.is_group():
-                                    base_stack.append((child, False))
+                                    base_stack.append(child)
                                 elif child.name.startswith(("BASE", "FORE")):
                                     collect_layers(child, is_fore)
                         else:
-                            base_stack.append((target_action, False))
+                            base_stack.append(target_action)
                     continue
                 
-                elif layer_name.startswith("表情") and not found_expression and expression:
+                elif expression and  not found_expression and layer_name.startswith("表情"):
                     # 在表情组中查找选中的表情
                     found_expression = True
                     
@@ -449,7 +430,7 @@ def compose_image(path: str, pose: str,
                             found_target_in_subgroup = False
                             for child in subgroup:
                                 if not child.is_group() and _clean(child.name) == expression:
-                                    fore_stack.append((child, True))
+                                    fore_stack.append(child)
                                     found_target_in_subgroup = True
                                     break
                             
@@ -457,16 +438,16 @@ def compose_image(path: str, pose: str,
                                 # 只在当前子组内查找BASE/FORE图层（不递归）
                                 for child in subgroup:
                                     if not child.is_group() and child.name.startswith(("BASE", "FORE")):
-                                        fore_stack.append((child, True))
+                                        fore_stack.append(child)
                                 # 找到目标表情后，跳出循环，不再检查其他子组
                                 break
                     else:
                         # 无子组，直接查找
                         for child in layer:
                             if not child.is_group() and _clean(child.name) == expression:
-                                fore_stack.append((child, True))
+                                fore_stack.append(child)
                             elif not child.is_group() and child.name.startswith(("BASE", "FORE")):
-                                fore_stack.append((child, True))
+                                fore_stack.append(child)
                     continue
                 
                 # 对于其他组，如果已经在某个选项内部，继续递归查找BASE/FORE
@@ -477,32 +458,36 @@ def compose_image(path: str, pose: str,
                 # 普通图层
                 # 如果已经在选项组内或者是BASE/FORE的直接子图层，加入栈
                 if found_pose or found_clothing or found_action or found_expression or is_fore:
-                    layer_info = (layer, False)
-                    (fore_stack if is_fore else base_stack).append(layer_info)
+                    (fore_stack if is_fore else base_stack).append(layer)
     
     # 从PSD根开始深度遍历
     collect_layers(psd)
     
-    # 按图层顺序排序
-    # base_stack.sort(key=lambda x: x[0].top)
-    # fore_stack.sort(key=lambda x: x[0].top)
+    # 获取增强的图像加载器
+    from image_processor import get_enhanced_loader
+    loader = get_enhanced_loader()
     
-    # 合成图像
+    # 开始PSD合成
     w, h = psd.size
-    canvas = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    if not loader.start_psd_composition(w, h):
+        raise RuntimeError("Failed to start PSD composition")
     
     # 合成基础栈
-    for layer, needs_alpha in base_stack:
+    for layer in base_stack:
         im = _layer_topil(layer)
         if im:
             l, t, _, _ = layer.bbox
-            canvas = _alpha_composite(canvas, im, (l, t))
+            # 使用C++合成而不是PIL
+            loader.add_psd_layer(im, l, t)
     
     # 合成顶层栈
-    for layer, needs_alpha in fore_stack:
+    for layer in fore_stack:
         im = _layer_topil(layer)
         if im:
             l, t, _, _ = layer.bbox
-            canvas = _alpha_composite(canvas, im, (l, t))
+            loader.add_psd_layer(im, l, t)
     
-    return canvas
+    # 结束合成并返回索引
+    psd_index = loader.finish_psd_composition()
+    
+    return psd_index
